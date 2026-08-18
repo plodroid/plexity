@@ -9,51 +9,38 @@ const els = {
   saveSettingsBtn: $('#saveSettingsBtn'), newSearchBtn: $('#newSearchBtn')
 };
 
-const COMPAT_MODEL = 'SmolLM2-360M-Instruct-q4f32_1-MLC';
-const defaults = { model: COMPAT_MODEL, searx: '', defaultAi: true };
-
+const AI_MODEL = 'onnx-community/SmolLM-135M-Instruct-ONNX';
+const defaults = { searx: '', defaultAi: true };
 let settings = loadSettings();
 let mode = settings.defaultAi ? 'ai' : 'search';
-let engine = null;
-let engineModel = null;
-let webllmModule = null;
-let gpuInfo = { available: false, shaderF16: false };
-let enginePromise = null;
+let generator = null;
+let generatorPromise = null;
+let transformersModule = null;
+let preloadStarted = false;
+let activeSearch = 0;
 
 function loadSettings() {
   try { return { ...defaults, ...JSON.parse(localStorage.getItem('plexity-settings') || '{}') }; }
   catch { return { ...defaults }; }
 }
 function saveSettings() {
-  settings = { model: els.modelSelect.value, searx: els.searxEndpoint.value.trim(), defaultAi: els.defaultAi.checked };
+  settings = { searx: els.searxEndpoint.value.trim(), defaultAi: els.defaultAi.checked };
   localStorage.setItem('plexity-settings', JSON.stringify(settings));
 }
 function hydrateSettings() {
-  if (![...els.modelSelect.options].some(o => o.value === settings.model)) settings.model = defaults.model;
-  els.modelSelect.value = settings.model;
-  els.searxEndpoint.value = settings.searx;
+  els.searxEndpoint.value = settings.searx || '';
   els.defaultAi.checked = settings.defaultAi;
   setMode(settings.defaultAi ? 'ai' : 'search');
+  if (els.modelSelect) {
+    els.modelSelect.innerHTML = '<option value="wasm">Fast & compatible — SmolLM 135M (~181 MB)</option>';
+    els.modelSelect.disabled = true;
+  }
 }
 
-async function detectWebGPU() {
-  if (!('gpu' in navigator)) return markGpuUnavailable();
-  try {
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-    if (!adapter) throw new Error('No adapter');
-    const shaderF16 = adapter.features?.has?.('shader-f16') || false;
-    gpuInfo = { available: true, shaderF16 };
-    els.gpuBadge.textContent = shaderF16 ? 'WebGPU ready · FP16' : 'WebGPU ready · compatible mode';
-    els.gpuBadge.classList.remove('error');
-    els.gpuBadge.classList.add('ok');
-    return gpuInfo;
-  } catch { return markGpuUnavailable(); }
-}
-function markGpuUnavailable() {
-  gpuInfo = { available: false, shaderF16: false };
-  els.gpuBadge.textContent = 'WebGPU unavailable';
-  els.gpuBadge.classList.add('error');
-  return gpuInfo;
+function detectRuntime() {
+  els.gpuBadge.textContent = 'Local AI · compatible mode';
+  els.gpuBadge.classList.remove('error');
+  els.gpuBadge.classList.add('ok');
 }
 
 function setMode(next) {
@@ -87,7 +74,7 @@ function escapeHtml(s = '') { return String(s).replace(/[&<>'"]/g, c => ({'&':'&
 function renderSources(results) {
   els.sourceCount.textContent = results.length;
   if (!results.length) {
-    els.sourceList.innerHTML = '<div class="empty">No browser-safe web source returned results. Add a SearXNG endpoint in Settings for full web search.</div>';
+    els.sourceList.innerHTML = '<div class="empty">No browser-safe web source returned results. Add a SearXNG endpoint in Settings for broader web search.</div>';
     return;
   }
   els.sourceList.innerHTML = results.map((r, i) => `
@@ -101,7 +88,8 @@ function renderSources(results) {
 async function fetchSearx(query) {
   if (!settings.searx) return [];
   const url = new URL(settings.searx.replace(/\/$/, ''));
-  url.searchParams.set('q', query); url.searchParams.set('format', 'json');
+  url.searchParams.set('q', query);
+  url.searchParams.set('format', 'json');
   const res = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(`SearXNG HTTP ${res.status}`);
   const data = await res.json();
@@ -111,7 +99,11 @@ async function fetchWikipedia(query) {
   const res = await fetch(`https://en.wikipedia.org/w/rest.php/v1/search/page?q=${encodeURIComponent(query)}&limit=8`);
   if (!res.ok) throw new Error('Wikipedia search failed');
   const data = await res.json();
-  return (data.pages || []).map(p => ({ title: p.title, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(p.key || p.title.replace(/ /g, '_'))}`, snippet: stripHtml(p.excerpt || p.description || '') }));
+  return (data.pages || []).map(p => ({
+    title: p.title,
+    url: `https://en.wikipedia.org/wiki/${encodeURIComponent(p.key || p.title.replace(/ /g, '_'))}`,
+    snippet: stripHtml(p.excerpt || p.description || '')
+  }));
 }
 async function fetchDuckDuckGo(query) {
   const res = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&no_redirect=1&skip_disambig=1`);
@@ -120,137 +112,133 @@ async function fetchDuckDuckGo(query) {
   const out = [];
   if (data.AbstractURL && data.AbstractText) out.push({ title: data.Heading || query, url: data.AbstractURL, snippet: data.AbstractText });
   const flatten = topics => topics.flatMap(t => t.Topics ? flatten(t.Topics) : [t]);
-  for (const t of flatten(data.RelatedTopics || []).slice(0, 7)) if (t.FirstURL && t.Text) out.push({ title: t.Text.split(' - ')[0], url: t.FirstURL, snippet: t.Text });
+  for (const t of flatten(data.RelatedTopics || []).slice(0, 7)) {
+    if (t.FirstURL && t.Text) out.push({ title: t.Text.split(' - ')[0], url: t.FirstURL, snippet: t.Text });
+  }
   return out;
 }
 async function searchWeb(query) {
-  setStatus('Searching the web', 'Looking for useful sources…', 12);
   const seen = new Set(), combined = [];
-  const add = items => { for (const r of items) { if (!r?.url || seen.has(r.url)) continue; seen.add(r.url); combined.push(r); if (combined.length >= 10) break; } };
-  if (settings.searx) try { add(await fetchSearx(query)); } catch (err) { console.warn('SearXNG unavailable:', err); }
-  if (combined.length < 5) {
-    const settled = await Promise.allSettled([fetchDuckDuckGo(query), fetchWikipedia(query)]);
-    for (const result of settled) if (result.status === 'fulfilled') add(result.value);
-  }
+  const add = items => {
+    for (const r of items) {
+      if (!r?.url || seen.has(r.url)) continue;
+      seen.add(r.url); combined.push(r);
+      if (combined.length >= 10) break;
+    }
+  };
+
+  const jobs = [fetchDuckDuckGo(query), fetchWikipedia(query)];
+  if (settings.searx) jobs.unshift(fetchSearx(query));
+  const settled = await Promise.allSettled(jobs);
+  for (const result of settled) if (result.status === 'fulfilled') add(result.value);
   return combined.slice(0, 10);
 }
 
-function isFp16Model(model) { return model.includes('q4f16_1-MLC'); }
-function f32FallbackFor(model) { return model.replace('q4f16_1-MLC', 'q4f32_1-MLC'); }
-
-async function createEngine(model) {
-  setStatus('Loading local AI', `Preparing ${model.includes('360M') ? 'lightweight compatibility model' : 'local AI model'}…`, 20);
-  webllmModule ||= await import('https://esm.run/@mlc-ai/web-llm');
-  return webllmModule.CreateMLCEngine(model, {
-    initProgressCallback: p => {
-      const raw = typeof p.progress === 'number' ? p.progress * 100 : 30;
-      setStatus('Loading local AI', p.text || 'Preparing WebGPU model…', Math.max(20, Math.min(92, raw)));
-    }
-  });
+function quickAnswer(results) {
+  const useful = results.find(r => r.snippet && r.snippet.length > 35);
+  if (!useful) return 'I found the web results, but there is not enough useful text in the snippets to give a quick answer yet.';
+  return `${useful.snippet} [${results.indexOf(useful) + 1}]`;
 }
 
-async function dropEngine() {
-  const old = engine;
-  engine = null; engineModel = null; enginePromise = null;
-  if (old?.unload) { try { await old.unload(); } catch { /* already dead is fine */ } }
-}
+async function loadGenerator(showProgress = false) {
+  if (generator) return generator;
+  if (generatorPromise) return generatorPromise;
 
-function preferredModel() {
-  const requested = settings.model || defaults.model;
-  if (!gpuInfo.shaderF16 && isFp16Model(requested)) return f32FallbackFor(requested);
-  return requested;
-}
-
-async function ensureEngine(forceModel = null) {
-  if (!gpuInfo.available) await detectWebGPU();
-  if (!gpuInfo.available) throw new Error('WebGPU is not available in this browser. Use Search mode or a recent WebGPU-capable browser.');
-  const wanted = forceModel || preferredModel();
-  if (engine && engineModel === wanted) return engine;
-  if (enginePromise) return enginePromise;
-  enginePromise = (async () => {
-    if (engine && engineModel !== wanted) await dropEngine();
-    const fresh = await createEngine(wanted);
-    engine = fresh; engineModel = wanted;
-    return fresh;
+  generatorPromise = (async () => {
+    if (showProgress) setStatus('Preparing local AI', 'First use downloads a small ~181 MB model. It is cached for later searches.', 65);
+    transformersModule ||= await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/+esm');
+    const { pipeline } = transformersModule;
+    const pipe = await pipeline('text-generation', AI_MODEL, {
+      device: 'wasm',
+      dtype: 'q4'
+    });
+    generator = pipe;
+    return pipe;
   })();
-  try { return await enginePromise; }
-  finally { enginePromise = null; }
+
+  try { return await generatorPromise; }
+  finally { generatorPromise = null; }
 }
 
-function buildContext(results) {
-  return results.slice(0, 8).map((r, i) => `[${i + 1}] ${r.title}\nURL: ${r.url}\nSnippet: ${r.snippet || '(no snippet)'}`).join('\n\n');
-}
-function completionRequest(query, results) {
-  return {
-    messages: [
-      { role: 'system', content: 'You are Plexity. Be concise, useful, and source-grounded. Never invent facts or sources.' },
-      { role: 'user', content: `Answer using only these search-result snippets. Cite factual claims with [1], [2], etc. If the sources are weak, say so.\n\nQuestion: ${query}\n\nSearch results:\n${buildContext(results) || 'No usable results.'}` }
-    ],
-    temperature: 0.25,
-    max_tokens: 500,
-    stream: true
-  };
+function buildPrompt(query, results) {
+  const context = results.slice(0, 6).map((r, i) => `[${i + 1}] ${r.title}: ${r.snippet || 'No snippet.'}`).join('\n');
+  return `You are Plexity, a concise web search assistant. Answer the question using ONLY the search snippets below. Cite claims with [1], [2], etc. If the snippets do not support an answer, say so. Keep the answer under 120 words.\n\nQuestion: ${query}\n\nSources:\n${context}\n\nAnswer:`;
 }
 
-async function streamAnswer(localEngine, request) {
-  const stream = await localEngine.chat.completions.create(request);
-  let text = '';
-  for await (const chunk of stream) {
-    text += chunk.choices?.[0]?.delta?.content || '';
-    els.answerText.textContent = text;
+function extractGeneratedText(output, prompt) {
+  const value = output?.[0]?.generated_text;
+  if (Array.isArray(value)) {
+    const last = value[value.length - 1];
+    return String(last?.content || '').trim();
   }
+  const text = String(value || '').trim();
+  if (text.startsWith(prompt)) return text.slice(prompt.length).trim();
   return text;
 }
 
-async function generateAnswer(query, results) {
+async function generateAnswer(query, results, searchId) {
   els.answerCard.classList.remove('hidden');
-  els.answerText.textContent = '';
-  const request = completionRequest(query, results);
-  let localEngine = await ensureEngine();
-  setStatus('Writing answer', 'The model is reading the search results locally in your browser…', 94);
+  els.answerText.textContent = quickAnswer(results);
+  els.answerMeta.textContent = 'Quick answer from web snippets · local AI is refining this…';
 
-  try {
-    await streamAnswer(localEngine, request);
-  } catch (err) {
-    const message = String(err?.message || err);
-    const recoverable = /already been disposed|Module has already been disposed|Object has already been disposed|ShaderModule|compute stage|index_kernel/i.test(message);
-    if (!recoverable || engineModel === COMPAT_MODEL) throw err;
+  const pipe = await loadGenerator(true);
+  if (searchId !== activeSearch) return;
+  setStatus('Refining answer', 'Local AI is summarizing the sources…', 92);
 
-    console.warn('Primary WebLLM engine failed; retrying with lightweight compatibility model:', err);
-    setStatus('Recovering local AI', 'The first WebGPU engine failed. Starting the lightweight compatibility model instead…', 28);
-    await dropEngine();
-    localEngine = await ensureEngine(COMPAT_MODEL);
-    els.answerText.textContent = '';
-    setStatus('Writing answer', 'Compatibility model loaded. Generating locally…', 94);
-    await streamAnswer(localEngine, request);
-  }
+  const prompt = buildPrompt(query, results);
+  const output = await pipe(prompt, {
+    max_new_tokens: 110,
+    do_sample: false,
+    repetition_penalty: 1.08
+  });
+  if (searchId !== activeSearch) return;
 
-  const compatibilityNote = engineModel === COMPAT_MODEL ? ' · compatibility model' : '';
-  els.answerMeta.textContent = `Generated locally with ${engineModel}${compatibilityNote}. Your query was not sent to an AI API.`;
+  const text = extractGeneratedText(output, prompt);
+  if (text) els.answerText.textContent = text;
+  els.answerMeta.textContent = 'Generated locally with SmolLM 135M on CPU/WASM. No AI API key used.';
 }
 
 async function runSearch(query) {
   query = query.trim(); if (!query) return;
+  const searchId = ++activeSearch;
   showResults(query);
-  els.answerCard.classList.add('hidden'); els.answerText.textContent = ''; els.answerMeta.textContent = ''; els.sourceList.innerHTML = ''; els.sourceCount.textContent = '0';
+  els.answerCard.classList.add('hidden');
+  els.answerText.textContent = '';
+  els.answerMeta.textContent = '';
+  els.sourceList.innerHTML = '';
+  els.sourceCount.textContent = '0';
+  setStatus('Searching', 'Fetching sources…', 18);
+
   try {
     const results = await searchWeb(query);
+    if (searchId !== activeSearch) return;
     renderSources(results);
-    setStatus('Sources ready', `Found ${results.length} source${results.length === 1 ? '' : 's'}.`, 55);
+    clearStatus();
+
     if (mode === 'ai') {
-      try { await generateAnswer(query, results); }
-      catch (err) {
-        console.error('Plexity AI failed:', err);
-        const message = String(err?.message || err);
-        els.answerCard.classList.remove('hidden');
-        els.answerText.innerHTML = `<span class="error">AI couldn't start:</span> ${escapeHtml(message)}\n\nYour web results are still available on the right.`;
-        els.answerMeta.textContent = 'This GPU/driver may not support WebLLM reliably. Search mode still works.';
-      }
+      els.answerCard.classList.remove('hidden');
+      els.answerText.textContent = quickAnswer(results);
+      els.answerMeta.textContent = 'Quick answer shown instantly · preparing local AI refinement…';
+      generateAnswer(query, results, searchId).catch(err => {
+        if (searchId !== activeSearch) return;
+        console.error('Local AI refinement failed:', err);
+        els.answerMeta.textContent = 'Quick answer from web snippets · local AI refinement was unavailable.';
+        clearStatus();
+      }).finally(() => { if (searchId === activeSearch) clearStatus(); });
     }
   } catch (err) {
-    renderSources([]); els.answerCard.classList.remove('hidden');
+    if (searchId !== activeSearch) return;
+    renderSources([]);
+    els.answerCard.classList.remove('hidden');
     els.answerText.innerHTML = `<span class="error">Search failed:</span> ${escapeHtml(err.message)}`;
-  } finally { clearStatus(); }
+    clearStatus();
+  }
+}
+
+function preloadAI() {
+  if (preloadStarted) return;
+  preloadStarted = true;
+  loadGenerator(false).catch(err => console.warn('AI preload skipped/failed:', err));
 }
 
 els.form.addEventListener('submit', e => { e.preventDefault(); runSearch(els.input.value); });
@@ -258,11 +246,9 @@ $$('.mode').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mod
 $$('[data-query]').forEach(b => b.addEventListener('click', () => { els.input.value = b.dataset.query; runSearch(b.dataset.query); }));
 els.newSearchBtn.addEventListener('click', resetHome);
 els.settingsBtn.addEventListener('click', () => els.dialog.showModal());
-els.saveSettingsBtn.addEventListener('click', async () => {
-  const previousModel = settings.model;
-  saveSettings(); setMode(settings.defaultAi ? 'ai' : 'search');
-  if (settings.model !== previousModel) await dropEngine();
-});
+els.saveSettingsBtn.addEventListener('click', () => { saveSettings(); setMode(settings.defaultAi ? 'ai' : 'search'); });
 
 hydrateSettings();
-detectWebGPU();
+detectRuntime();
+if ('requestIdleCallback' in window) requestIdleCallback(preloadAI, { timeout: 2500 });
+else setTimeout(preloadAI, 1200);
