@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0c0b0f" />
+  <meta name="description" content="Plexity — browser-native AI search powered by WebGPU." />
+  <title>Plexity — AI Search</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Plexity home">
+      <span class="brand-mark">P</span>
+      <span>Plexity</span>
+    </a>
+    <div class="top-actions">
+      <span id="gpuBadge" class="badge">Checking WebGPU…</span>
+      <button id="settingsBtn" class="icon-btn" aria-label="Settings">⚙</button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="hero" id="hero">
+      <div class="eyebrow">AI SEARCH • RUNS IN YOUR BROWSER</div>
+      <h1>Search the web.<br><span>Ask it anything.</span></h1>
+      <p class="subhead">Plexity combines live web results with a local AI model running through WebGPU — no Ollama, no account, no AI API key.</p>
+
+      <form id="searchForm" class="searchbox">
+        <div class="search-input-wrap">
+          <span class="search-icon">⌕</span>
+          <input id="searchInput" autocomplete="off" placeholder="Ask Plexity anything…" aria-label="Search query" />
+          <button class="go-btn" type="submit">Search</button>
+        </div>
+        <div class="mode-row" role="tablist" aria-label="Search mode">
+          <button type="button" class="mode active" data-mode="ai">✦ AI Answer</button>
+          <button type="button" class="mode" data-mode="search">⌕ Search</button>
+        </div>
+      </form>
+
+      <div class="suggestions">
+        <button data-query="What is the best budget GPU right now?">Best budget GPU</button>
+        <button data-query="Explain quantum computing simply">Quantum computing</button>
+        <button data-query="What changed in Minecraft recently?">Minecraft updates</button>
+      </div>
+    </section>
+
+    <section id="resultsView" class="results-view hidden">
+      <div class="result-head">
+        <div>
+          <div class="mini-label">RESULTS FOR</div>
+          <h2 id="queryTitle"></h2>
+        </div>
+        <button id="newSearchBtn" class="secondary-btn">New search</button>
+      </div>
+
+      <div id="statusCard" class="status-card hidden">
+        <div class="spinner"></div>
+        <div>
+          <strong id="statusTitle">Working…</strong>
+          <p id="statusText">Getting things ready.</p>
+          <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
+        </div>
+      </div>
+
+      <div class="results-grid">
+        <article id="answerCard" class="answer-card hidden">
+          <div class="card-title-row">
+            <div class="spark">✦</div>
+            <div>
+              <div class="mini-label">PLEXITY ANSWER</div>
+              <h3>AI summary</h3>
+            </div>
+          </div>
+          <div id="answerText" class="answer-text"></div>
+          <div id="answerMeta" class="answer-meta"></div>
+        </article>
+
+        <aside class="source-panel">
+          <div class="panel-head">
+            <div>
+              <div class="mini-label">WEB</div>
+              <h3>Sources</h3>
+            </div>
+            <span id="sourceCount" class="count-pill">0</span>
+          </div>
+          <div id="sourceList" class="source-list"></div>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="settingsDialog" class="settings-dialog">
+    <form method="dialog" class="settings-card">
+      <div class="settings-head">
+        <div>
+          <div class="mini-label">PLEXITY</div>
+          <h3>Settings</h3>
+        </div>
+        <button class="icon-btn" value="cancel" aria-label="Close settings">✕</button>
+      </div>
+
+      <label>
+        <span>AI model</span>
+        <select id="modelSelect">
+          <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B — Fast (~879 MB VRAM)</option>
+          <option value="Llama-3.2-3B-Instruct-q4f16_1-MLC">Llama 3.2 3B — Better answers (~2.3 GB VRAM)</option>
+        </select>
+      </label>
+
+      <label>
+        <span>SearXNG endpoint</span>
+        <input id="searxEndpoint" placeholder="https://your-searx.example/search" />
+        <small>Optional. Plexity tries this first for full web results. If it fails, it falls back to public browser-safe sources.</small>
+      </label>
+
+      <label class="toggle-row">
+        <span>
+          <b>Use AI by default</b>
+          <small>Generate a local summary after searching.</small>
+        </span>
+        <input id="defaultAi" type="checkbox" checked />
+      </label>
+
+      <button id="saveSettingsBtn" value="default" class="save-btn">Save settings</button>
+    </form>
+  </dialog>
+
+  <noscript>Plexity needs JavaScript enabled.</noscript>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
