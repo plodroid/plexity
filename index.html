@@ -109,9 +109,12 @@
       <label>
         <span>AI model</span>
         <select id="modelSelect">
-          <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B — Fast (~879 MB VRAM)</option>
-          <option value="Llama-3.2-3B-Instruct-q4f16_1-MLC">Llama 3.2 3B — Better answers (~2.3 GB VRAM)</option>
+          <option value="Llama-3.2-1B-Instruct-q4f32_1-MLC">Llama 3.2 1B — Compatible (~1.1 GB VRAM)</option>
+          <option value="Llama-3.2-3B-Instruct-q4f32_1-MLC">Llama 3.2 3B — Better answers (more VRAM)</option>
+          <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B — FP16 (~879 MB, newer GPUs)</option>
+          <option value="Llama-3.2-3B-Instruct-q4f16_1-MLC">Llama 3.2 3B — FP16 (newer GPUs)</option>
         </select>
+        <small>Plexity automatically falls back to an f32 model if your GPU/driver cannot compile FP16 WebGPU shaders.</small>
       </label>
 
       <label>
