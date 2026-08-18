@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "plexity-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-18",
+  "ai": {
+    "binding": "AI"
+  },
+  "vars": {
+    "ALLOWED_ORIGIN": "https://plodroid.github.io"
+  }
+}
