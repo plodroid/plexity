@@ -30,7 +30,7 @@
     <section class="hero" id="hero">
       <div class="eyebrow">AI SEARCH • RUNS IN YOUR BROWSER</div>
       <h1>Search the web.<br><span>Ask it anything.</span></h1>
-      <p class="subhead">Plexity combines live web results with a lightweight local AI model — no Ollama, no account, no AI API key.</p>
+      <p class="subhead">Plexity combines live web results with a local Qwen model — no Ollama, no account, no AI API key.</p>
 
       <form id="searchForm" class="searchbox">
         <div class="search-input-wrap">
@@ -109,9 +109,9 @@
       <label>
         <span>AI model</span>
         <select id="modelSelect">
-          <option value="wasm">Balanced local AI — SmolLM2 360M</option>
+          <option value="wasm">Qwen2.5 0.5B — smarter local AI</option>
         </select>
-        <small>Runs locally with CPU/WASM for broad compatibility. Plexity starts loading it shortly after the page opens and caches it after first use.</small>
+        <small>Runs locally with CPU/WASM for broad compatibility. First load is larger, then the browser caches it for later searches.</small>
       </label>
 
       <label>
@@ -123,7 +123,7 @@
       <label class="toggle-row">
         <span>
           <b>Use AI by default</b>
-          <small>Generate a direct local answer after the web results load.</small>
+          <small>Answer simple questions instantly and use local AI for the rest.</small>
         </span>
         <input id="defaultAi" type="checkbox" checked />
       </label>
