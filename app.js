@@ -9,22 +9,21 @@ const els = {
   saveSettingsBtn: $('#saveSettingsBtn'), newSearchBtn: $('#newSearchBtn')
 };
 
-const AI_MODEL = 'onnx-community/Qwen2.5-0.5B-Instruct';
 const defaults = { searx: '', defaultAi: true };
 const STOP_WORDS = new Set(['a','an','the','is','are','was','were','what','which','who','when','where','why','how','does','do','did','make','of','to','for','in','on','at','and','or','it','this','that']);
 const ANIMAL_SOUNDS = {
-  cow:'moo', cattle:'moo', cat:'meow', kitten:'meow', dog:'bark', puppy:'bark', sheep:'baa', lamb:'baa',
-  duck:'quack', pig:'oink', horse:'neigh', lion:'roar', tiger:'roar', wolf:'howl', frog:'croak', rooster:'crow',
-  chicken:'cluck', hen:'cluck', owl:'hoot', bee:'buzz', snake:'hiss', elephant:'trumpet', goat:'bleat', donkey:'bray', turkey:'gobble'
+  cow:'moo', cattle:'moo', cat:'meow', kitten:'meow', dog:'bark', puppy:'bark', sheep:'baa', lamb:'baa', duck:'quack', pig:'oink',
+  horse:'neigh', lion:'roar', tiger:'roar', wolf:'howl', frog:'croak', rooster:'crow', chicken:'cluck', hen:'cluck', owl:'hoot',
+  bee:'buzz', snake:'hiss', elephant:'trumpet', goat:'bleat', donkey:'bray', turkey:'gobble'
 };
+const INANIMATE_GROW = new Set(['car','cars','computer','pc','phone','laptop','house','building','chair','table','tv','television','console','keyboard','mouse','monitor','bike','bicycle','motorcycle','truck','bus','plane','airplane','boat','ship']);
 
 let settings = loadSettings();
 let mode = settings.defaultAi ? 'ai' : 'search';
-let generator = null;
-let generatorPromise = null;
-let transformersModule = null;
-let preloadStarted = false;
 let activeSearch = 0;
+let aiWorker = null;
+let aiRequest = null;
+let aiSequence = 0;
 
 function loadSettings() {
   try { return { ...defaults, ...JSON.parse(localStorage.getItem('plexity-settings') || '{}') }; }
@@ -39,12 +38,12 @@ function hydrateSettings() {
   els.defaultAi.checked = settings.defaultAi;
   setMode(settings.defaultAi ? 'ai' : 'search');
   if (els.modelSelect) {
-    els.modelSelect.innerHTML = '<option value="wasm">Qwen2.5 0.5B — smarter local AI</option>';
+    els.modelSelect.innerHTML = '<option value="worker">Qwen2.5 0.5B — isolated worker</option>';
     els.modelSelect.disabled = true;
   }
 }
 function detectRuntime() {
-  els.gpuBadge.textContent = 'Local AI · CPU/WASM';
+  els.gpuBadge.textContent = 'Local AI · isolated CPU mode';
   els.gpuBadge.classList.remove('error');
   els.gpuBadge.classList.add('ok');
 }
@@ -67,6 +66,7 @@ function showResults(query) {
 }
 function resetHome() {
   ++activeSearch;
+  cancelAI();
   els.results.classList.add('hidden');
   els.hero.classList.remove('hidden');
   els.input.focus();
@@ -163,75 +163,128 @@ async function searchWeb(query) {
 
 function directAnswer(query) {
   const q = query.toLowerCase().trim().replace(/[?!.]+$/g, '');
-  let match = q.match(/(?:what sound (?:does|do)\s+(?:a |an |the )?|what does (?:a |an |the )?)([a-z]+)(?:\s+make|\s+say)?$/i);
-  if (match) {
-    const animal = match[1].toLowerCase();
+  const soundMatch = q.match(/(?:what sound (?:does|do)\s+(?:a |an |the )?|what does (?:a |an |the )?)([a-z]+)(?:\s+make|\s+say)?$/i);
+  if (soundMatch) {
+    const animal = soundMatch[1].toLowerCase();
     const sound = ANIMAL_SOUNDS[animal];
     if (sound) return `A ${animal} typically says “${sound}.”`;
   }
+
+  const growMatch = q.match(/^how (?:do i |can i |to )?grow (?:a |an |the )?([a-z]+)$/i);
+  if (growMatch && INANIMATE_GROW.has(growMatch[1])) {
+    const thing = growMatch[1];
+    return `You can’t literally grow a ${thing} because it isn’t a living organism. Cars are manufactured from parts and materials. If you meant growing a car-related business, collection, or project, say which one and I can help.`;
+  }
+
   if (/^(?:what(?:'s| is) )?the longest word(?: in (?:english|history))?$/i.test(q) || /longest word in history/i.test(q)) {
-    return 'There is no single universally accepted “longest word.” In English dictionaries, **pneumonoultramicroscopicsilicovolcanoconiosis** (45 letters) is commonly cited as one of the longest. Systematic chemical names can be vastly longer, so the answer depends on what counts as a word.';
+    return 'There is no single universally accepted “longest word.” In English dictionaries, pneumonoultramicroscopicsilicovolcanoconiosis (45 letters) is commonly cited as one of the longest. Chemical names can be vastly longer, so the answer depends on what counts as a word.';
   }
   return null;
-}
-
-async function loadGenerator(showProgress = false) {
-  if (generator) return generator;
-  if (generatorPromise) return generatorPromise;
-  generatorPromise = (async () => {
-    if (showProgress) setStatus('Preparing local AI', 'First load downloads the local Qwen model. It is cached for later searches.', 64);
-    transformersModule ||= await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/+esm');
-    const { pipeline } = transformersModule;
-    generator = await pipeline('text-generation', AI_MODEL, { device: 'wasm', dtype: 'q4' });
-    return generator;
-  })();
-  try { return await generatorPromise; }
-  finally { generatorPromise = null; }
 }
 
 function looksTimeSensitive(query) {
   return /\b(today|now|current|currently|latest|recent|recently|news|price|cost|weather|score|release|version|update|best|recommend|202[4-9])\b/i.test(query);
 }
 function usefulSources(results) {
-  return results.filter(r => (r._score || 0) >= 5 && r.snippet).slice(0, 5);
+  return results.filter(r => (r._score || 0) >= 5 && r.snippet).slice(0, 3);
 }
 function buildMessages(query, results) {
   const current = looksTimeSensitive(query);
   const sources = usefulSources(results);
-  const sourceText = sources.map((r, i) => `[${i + 1}] ${r.title}: ${r.snippet.slice(0, 450)}`).join('\n');
-
+  const sourceText = sources.map((r, i) => `[${i + 1}] ${r.title}: ${r.snippet.slice(0, 220)}`).join('\n');
   const system = current
-    ? 'You are Plexity, an accurate AI search assistant. The question may depend on current information. Use only useful supplied web snippets for current claims. Cite them as [1], [2], etc. If they do not support an answer, say that clearly. Ignore irrelevant sources. Answer directly and concisely.'
-    : 'You are Plexity, a helpful and accurate assistant. For timeless/common-knowledge questions, answer from your own knowledge. Do not let irrelevant search snippets distract you. If useful snippets are provided, you may use them, but do not copy unrelated text. Answer the exact question first. Keep the answer concise.';
-
+    ? 'You are Plexity, a concise AI search assistant. For current claims, use only the relevant supplied snippets and cite [1], [2], etc. Ignore irrelevant snippets. If evidence is insufficient, say so. Answer the exact question first in under 70 words.'
+    : 'You are Plexity, a concise helpful assistant. Answer the exact question directly from common knowledge. Use snippets only if useful and ignore irrelevant ones. Do not invent steps for impossible premises. If something cannot literally be done, say so plainly. Keep the answer under 70 words.';
   const user = current
-    ? `Question: ${query}\n\nWeb snippets:\n${sourceText || 'No sufficiently relevant web snippets were found.'}`
-    : `Question: ${query}${sourceText ? `\n\nPotentially useful web snippets (ignore any that are irrelevant):\n${sourceText}` : ''}`;
+    ? `Question: ${query}\n\nRelevant web snippets:\n${sourceText || 'No sufficiently relevant snippets.'}`
+    : `Question: ${query}${sourceText ? `\n\nOptional snippets:\n${sourceText}` : ''}`;
+  return [{ role: 'system', content: system }, { role: 'user', content: user }];
+}
 
-  return [
-    { role: 'system', content: system },
-    { role: 'user', content: user }
-  ];
-}
-function extractChatAnswer(output) {
-  const value = output?.[0]?.generated_text;
-  if (Array.isArray(value)) {
-    for (let i = value.length - 1; i >= 0; i--) {
-      if (value[i]?.role === 'assistant' && value[i]?.content) return String(value[i].content).trim();
-    }
-    return String(value[value.length - 1]?.content || '').trim();
-  }
-  return String(value || '').trim();
-}
 function cleanModelAnswer(text) {
-  let out = String(text || '')
+  return String(text || '')
     .replace(/<\|.*?\|>/g, '')
     .replace(/^assistant\s*[:\n]\s*/i, '')
     .replace(/^answer\s*:\s*/i, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
     .trim();
-  const repeated = out.match(/^(.{12,120}?)(?:\n\s*\1){2,}/s);
-  if (repeated) out = repeated[1].trim();
-  return out;
+}
+
+function createAIWorker() {
+  if (aiWorker) return aiWorker;
+  aiWorker = new Worker('./ai-worker.js', { type: 'module' });
+  aiWorker.onerror = (event) => {
+    console.error('AI worker crashed:', event.message || event);
+    if (aiRequest) {
+      aiRequest.reject(new Error('The local AI worker crashed.'));
+      aiRequest = null;
+    }
+    aiWorker.terminate();
+    aiWorker = null;
+  };
+  aiWorker.onmessage = (event) => {
+    const data = event.data || {};
+    if (!aiRequest || data.id !== aiRequest.id) return;
+    if (data.type === 'status') {
+      if (data.status === 'loading') {
+        setStatus('Loading local AI', 'One-time model load. The page stays usable while this happens.', 64);
+        els.answerMeta.textContent = 'Loading the local model in a background worker…';
+      } else if (data.status === 'generating') {
+        aiRequest.startedGenerating = true;
+        clearTimeout(aiRequest.timer);
+        aiRequest.timer = setTimeout(() => timeoutAI(aiRequest.id), 12000);
+        setStatus('Writing answer', 'Local AI is thinking in a background worker…', 92);
+        els.answerMeta.textContent = 'Local AI is answering…';
+      }
+      return;
+    }
+    if (data.type === 'result') {
+      clearTimeout(aiRequest.timer);
+      const resolve = aiRequest.resolve;
+      aiRequest = null;
+      resolve(cleanModelAnswer(data.text));
+    } else if (data.type === 'error') {
+      clearTimeout(aiRequest.timer);
+      const reject = aiRequest.reject;
+      aiRequest = null;
+      reject(new Error(data.error || 'Local AI failed.'));
+    }
+  };
+  return aiWorker;
+}
+
+function timeoutAI(id) {
+  if (!aiRequest || aiRequest.id !== id) return;
+  const reject = aiRequest.reject;
+  aiRequest = null;
+  if (aiWorker) aiWorker.terminate();
+  aiWorker = null;
+  reject(new Error('Local AI took too long and was stopped.'));
+}
+
+function cancelAI() {
+  if (aiRequest) {
+    clearTimeout(aiRequest.timer);
+    aiRequest.reject(new Error('cancelled'));
+    aiRequest = null;
+  }
+  if (aiWorker) {
+    aiWorker.terminate();
+    aiWorker = null;
+  }
+}
+
+function askLocalAI(messages, maxNewTokens) {
+  if (aiRequest) cancelAI();
+  const worker = createAIWorker();
+  const id = ++aiSequence;
+  return new Promise((resolve, reject) => {
+    aiRequest = {
+      id, resolve, reject, startedGenerating: false,
+      timer: setTimeout(() => timeoutAI(id), 60000)
+    };
+    worker.postMessage({ id, messages, maxNewTokens });
+  });
 }
 
 async function generateAnswer(query, results, searchId) {
@@ -239,37 +292,46 @@ async function generateAnswer(query, results, searchId) {
   if (instant) {
     els.answerCard.classList.remove('hidden');
     els.answerText.textContent = instant;
-    els.answerMeta.textContent = 'Instant answer · local AI not needed for this simple question.';
+    els.answerMeta.textContent = 'Instant answer · local model not needed.';
     return;
   }
 
   els.answerCard.classList.remove('hidden');
   els.answerText.textContent = 'Thinking…';
-  els.answerMeta.textContent = generator ? 'Local AI is answering…' : 'Preparing local AI…';
+  els.answerMeta.textContent = 'Starting isolated local AI…';
+  const maxTokens = looksTimeSensitive(query) ? 64 : 52;
 
-  const pipe = await loadGenerator(!generator);
-  if (searchId !== activeSearch) return;
-  setStatus('Writing answer', 'Local AI is answering your question…', 92);
-
-  const messages = buildMessages(query, results);
-  const output = await pipe(messages, {
-    max_new_tokens: looksTimeSensitive(query) ? 140 : 110,
-    do_sample: false,
-    repetition_penalty: 1.15
-  });
-  if (searchId !== activeSearch) return;
-
-  const text = cleanModelAnswer(extractChatAnswer(output));
-  if (!text || text.length < 2) throw new Error('The local model returned an empty answer.');
-  els.answerText.textContent = text;
-  els.answerMeta.textContent = looksTimeSensitive(query)
-    ? 'Answered locally with relevant web context · check sources for current details.'
-    : 'Answered locally with Qwen2.5 0.5B · no AI API used.';
+  try {
+    const text = await askLocalAI(buildMessages(query, results), maxTokens);
+    if (searchId !== activeSearch) return;
+    if (!text || text.length < 2) throw new Error('The local model returned an empty answer.');
+    els.answerText.textContent = text;
+    els.answerMeta.textContent = looksTimeSensitive(query)
+      ? 'Answered locally with relevant web context · check sources for current details.'
+      : 'Answered locally with Qwen2.5 0.5B in an isolated worker.';
+  } catch (err) {
+    if (searchId !== activeSearch || err.message === 'cancelled') return;
+    const best = usefulSources(results)[0];
+    if (best && best._score >= 10) {
+      els.answerText.textContent = `${best.snippet.slice(0, 320)}${best.snippet.length > 320 ? '…' : ''}`;
+      els.answerMeta.textContent = `Local AI was stopped safely · showing the strongest matching web snippet instead.`;
+    } else {
+      els.answerText.textContent = err.message.includes('too long')
+        ? 'The local AI was taking too long, so Plexity stopped it instead of freezing the page. The web results are still available.'
+        : 'The local AI could not finish safely on this device. The web results are still available.';
+      els.answerMeta.textContent = 'The AI worker was isolated so the page can keep running.';
+    }
+  } finally {
+    if (searchId === activeSearch) clearStatus();
+  }
 }
 
 async function runSearch(query) {
-  query = query.trim(); if (!query) return;
+  query = query.trim();
+  if (!query) return;
+
   const searchId = ++activeSearch;
+  cancelAI();
   showResults(query);
   els.answerCard.classList.add('hidden');
   els.answerText.textContent = '';
@@ -293,16 +355,9 @@ async function runSearch(query) {
 
     if (mode === 'ai') {
       if (instant) {
-        els.answerMeta.textContent = 'Instant answer · simple question answered without waiting for the local model.';
+        els.answerMeta.textContent = 'Instant answer · no heavy model needed.';
       } else {
-        generateAnswer(query, results, searchId).catch(err => {
-          if (searchId !== activeSearch) return;
-          console.error('Local AI failed:', err);
-          els.answerCard.classList.remove('hidden');
-          els.answerText.textContent = 'I could not generate a reliable answer on this device. The search results are still available.';
-          els.answerMeta.textContent = 'Local AI failed safely instead of showing nonsense.';
-          clearStatus();
-        }).finally(() => { if (searchId === activeSearch) clearStatus(); });
+        generateAnswer(query, results, searchId);
       }
     }
   } catch (err) {
@@ -316,12 +371,6 @@ async function runSearch(query) {
   }
 }
 
-function preloadAI() {
-  if (preloadStarted) return;
-  preloadStarted = true;
-  loadGenerator(false).catch(err => console.warn('AI preload skipped/failed:', err));
-}
-
 els.form.addEventListener('submit', e => { e.preventDefault(); runSearch(els.input.value); });
 $$('.mode').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 $$('[data-query]').forEach(b => b.addEventListener('click', () => { els.input.value = b.dataset.query; runSearch(b.dataset.query); }));
@@ -331,4 +380,3 @@ els.saveSettingsBtn.addEventListener('click', () => { saveSettings(); setMode(se
 
 hydrateSettings();
 detectRuntime();
-setTimeout(preloadAI, 700);
