@@ -10,7 +10,7 @@ const els = {
 };
 
 const defaults = {
-  model: 'Llama-3.2-1B-Instruct-q4f16_1-MLC',
+  model: 'Llama-3.2-1B-Instruct-q4f32_1-MLC',
   searx: '',
   defaultAi: true
 };
@@ -18,7 +18,9 @@ const defaults = {
 let settings = loadSettings();
 let mode = settings.defaultAi ? 'ai' : 'search';
 let engine = null;
+let engineModel = null;
 let webllmModule = null;
+let gpuInfo = { available: false, shaderF16: false, adapter: null };
 
 function loadSettings() {
   try { return { ...defaults, ...JSON.parse(localStorage.getItem('plexity-settings') || '{}') }; }
@@ -29,6 +31,7 @@ function saveSettings() {
   localStorage.setItem('plexity-settings', JSON.stringify(settings));
 }
 function hydrateSettings() {
+  if (![...els.modelSelect.options].some(o => o.value === settings.model)) settings.model = defaults.model;
   els.modelSelect.value = settings.model;
   els.searxEndpoint.value = settings.searx;
   els.defaultAi.checked = settings.defaultAi;
@@ -37,20 +40,25 @@ function hydrateSettings() {
 
 async function detectWebGPU() {
   if (!('gpu' in navigator)) {
+    gpuInfo = { available: false, shaderF16: false, adapter: null };
     els.gpuBadge.textContent = 'WebGPU unavailable';
     els.gpuBadge.classList.add('error');
-    return false;
+    return gpuInfo;
   }
   try {
     const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) throw new Error('No adapter');
-    els.gpuBadge.textContent = 'WebGPU ready';
+    const shaderF16 = adapter.features?.has?.('shader-f16') || false;
+    gpuInfo = { available: true, shaderF16, adapter };
+    els.gpuBadge.textContent = shaderF16 ? 'WebGPU ready · FP16' : 'WebGPU ready · compatible mode';
+    els.gpuBadge.classList.remove('error');
     els.gpuBadge.classList.add('ok');
-    return true;
+    return gpuInfo;
   } catch {
+    gpuInfo = { available: false, shaderF16: false, adapter: null };
     els.gpuBadge.textContent = 'WebGPU unavailable';
     els.gpuBadge.classList.add('error');
-    return false;
+    return gpuInfo;
   }
 }
 
@@ -90,7 +98,7 @@ function stripHtml(text = '') {
   return div.textContent || '';
 }
 function escapeHtml(s = '') {
-  return s.replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+  return String(s).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 }
 function renderSources(results) {
   els.sourceCount.textContent = results.length;
@@ -167,18 +175,56 @@ async function searchWeb(query) {
   return combined.slice(0, 10);
 }
 
-async function ensureEngine() {
-  if (engine) return engine;
-  if (!('gpu' in navigator)) throw new Error('WebGPU is not available in this browser. Use Search mode or a recent WebGPU-capable browser.');
+function f32FallbackFor(model) {
+  return model.replace('q4f16_1-MLC', 'q4f32_1-MLC');
+}
+
+function isFp16Model(model) {
+  return model.includes('q4f16_1-MLC');
+}
+
+async function createEngine(model) {
   setStatus('Loading local AI', 'Downloading the model on this device. The first load can be large; later visits use the browser cache.', 20);
   webllmModule ||= await import('https://esm.run/@mlc-ai/web-llm');
-  engine = await webllmModule.CreateMLCEngine(settings.model, {
+  return webllmModule.CreateMLCEngine(model, {
     initProgressCallback: (p) => {
       const raw = typeof p.progress === 'number' ? p.progress * 100 : 30;
       setStatus('Loading local AI', p.text || 'Preparing WebGPU model…', Math.max(20, Math.min(92, raw)));
     }
   });
-  return engine;
+}
+
+async function ensureEngine() {
+  if (engine) return engine;
+  if (!gpuInfo.available) await detectWebGPU();
+  if (!gpuInfo.available) throw new Error('WebGPU is not available in this browser. Use Search mode or a recent WebGPU-capable browser.');
+
+  let requestedModel = settings.model || defaults.model;
+  let selectedModel = requestedModel;
+
+  if (isFp16Model(requestedModel) && !gpuInfo.shaderF16) {
+    selectedModel = f32FallbackFor(requestedModel);
+    setStatus('Using compatibility mode', 'Your GPU does not expose shader-f16, so Plexity switched to the f32 model automatically.', 18);
+  }
+
+  try {
+    engine = await createEngine(selectedModel);
+    engineModel = selectedModel;
+    return engine;
+  } catch (err) {
+    const message = String(err?.message || err);
+    const shaderFailure = /ShaderModule|shader-f16|compute stage|index_kernel/i.test(message);
+    if (shaderFailure && isFp16Model(selectedModel)) {
+      const fallback = f32FallbackFor(selectedModel);
+      console.warn('FP16 WebGPU model failed, retrying with f32:', err);
+      setStatus('Retrying in compatibility mode', 'Your GPU/driver rejected the FP16 shader. Retrying with the more compatible f32 model…', 22);
+      engine = null;
+      engine = await createEngine(fallback);
+      engineModel = fallback;
+      return engine;
+    }
+    throw err;
+  }
 }
 
 function buildContext(results) {
@@ -208,7 +254,8 @@ async function generateAnswer(query, results) {
     text += chunk.choices?.[0]?.delta?.content || '';
     els.answerText.textContent = text;
   }
-  els.answerMeta.textContent = `Generated locally with ${settings.model}. Your query was not sent to an AI API.`;
+  const compatibilityNote = engineModel !== settings.model ? ' (compatibility fallback)' : '';
+  els.answerMeta.textContent = `Generated locally with ${engineModel || settings.model}${compatibilityNote}. Your query was not sent to an AI API.`;
 }
 
 async function runSearch(query) {
@@ -229,9 +276,14 @@ async function runSearch(query) {
     if (mode === 'ai') {
       try { await generateAnswer(query, results); }
       catch (err) {
+        console.error('Plexity AI failed:', err);
         els.answerCard.classList.remove('hidden');
-        els.answerText.innerHTML = `<span class="error">AI couldn't start:</span> ${escapeHtml(err.message)}\n\nYour web results are still available on the right.`;
-        els.answerMeta.textContent = 'Tip: switch to Search mode on devices without WebGPU.';
+        const message = String(err?.message || err);
+        const friendly = /ShaderModule|compute stage|index_kernel/i.test(message)
+          ? 'Your GPU driver rejected this WebGPU model shader. Try the Compatible 1B model in Settings, update your browser/GPU driver, then reload Plexity.'
+          : message;
+        els.answerText.innerHTML = `<span class="error">AI couldn't start:</span> ${escapeHtml(friendly)}\n\nYour web results are still available on the right.`;
+        els.answerMeta.textContent = 'Search mode still works even when local AI is unavailable.';
       }
     }
   } catch (err) {
@@ -252,7 +304,10 @@ els.saveSettingsBtn.addEventListener('click', () => {
   const previousModel = settings.model;
   saveSettings();
   setMode(settings.defaultAi ? 'ai' : 'search');
-  if (engine && settings.model !== previousModel) engine = null;
+  if (engine && settings.model !== previousModel) {
+    engine = null;
+    engineModel = null;
+  }
 });
 
 hydrateSettings();
