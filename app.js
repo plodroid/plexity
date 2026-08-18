@@ -248,7 +248,12 @@ $$('.mode').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mod
 $$('[data-query]').forEach(b => b.addEventListener('click', () => { els.input.value = b.dataset.query; runSearch(b.dataset.query); }));
 els.newSearchBtn.addEventListener('click', resetHome);
 els.settingsBtn.addEventListener('click', () => els.dialog.showModal());
-els.saveSettingsBtn.addEventListener('click', () => { saveSettings(); setMode(settings.defaultAi ? 'ai' : mode); if (engine && settings.model !== defaults.model) engine = null; });
+els.saveSettingsBtn.addEventListener('click', () => {
+  const previousModel = settings.model;
+  saveSettings();
+  setMode(settings.defaultAi ? 'ai' : 'search');
+  if (engine && settings.model !== previousModel) engine = null;
+});
 
 hydrateSettings();
 detectWebGPU();
