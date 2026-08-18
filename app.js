@@ -9,9 +9,15 @@ const els = {
   saveSettingsBtn: $('#saveSettingsBtn'), newSearchBtn: $('#newSearchBtn')
 };
 
-const AI_MODEL = 'onnx-community/SmolLM2-360M-Instruct-ONNX';
+const AI_MODEL = 'onnx-community/Qwen2.5-0.5B-Instruct';
 const defaults = { searx: '', defaultAi: true };
 const STOP_WORDS = new Set(['a','an','the','is','are','was','were','what','which','who','when','where','why','how','does','do','did','make','of','to','for','in','on','at','and','or','it','this','that']);
+const ANIMAL_SOUNDS = {
+  cow:'moo', cattle:'moo', cat:'meow', kitten:'meow', dog:'bark', puppy:'bark', sheep:'baa', lamb:'baa',
+  duck:'quack', pig:'oink', horse:'neigh', lion:'roar', tiger:'roar', wolf:'howl', frog:'croak', rooster:'crow',
+  chicken:'cluck', hen:'cluck', owl:'hoot', bee:'buzz', snake:'hiss', elephant:'trumpet', goat:'bleat', donkey:'bray', turkey:'gobble'
+};
+
 let settings = loadSettings();
 let mode = settings.defaultAi ? 'ai' : 'search';
 let generator = null;
@@ -33,7 +39,7 @@ function hydrateSettings() {
   els.defaultAi.checked = settings.defaultAi;
   setMode(settings.defaultAi ? 'ai' : 'search');
   if (els.modelSelect) {
-    els.modelSelect.innerHTML = '<option value="wasm">Balanced local AI — SmolLM2 360M</option>';
+    els.modelSelect.innerHTML = '<option value="wasm">Qwen2.5 0.5B — smarter local AI</option>';
     els.modelSelect.disabled = true;
   }
 }
@@ -91,7 +97,7 @@ function scoreResult(query, r) {
 function rankResults(query, results) {
   return results.map((r, index) => ({ r, index, score: scoreResult(query, r) }))
     .sort((a, b) => b.score - a.score || a.index - b.index)
-    .map(x => x.r);
+    .map(x => ({ ...x.r, _score: x.score }));
 }
 
 function renderSources(results) {
@@ -155,11 +161,25 @@ async function searchWeb(query) {
   return rankResults(query, combined).slice(0, 10);
 }
 
+function directAnswer(query) {
+  const q = query.toLowerCase().trim().replace(/[?!.]+$/g, '');
+  let match = q.match(/(?:what sound (?:does|do)\s+(?:a |an |the )?|what does (?:a |an |the )?)([a-z]+)(?:\s+make|\s+say)?$/i);
+  if (match) {
+    const animal = match[1].toLowerCase();
+    const sound = ANIMAL_SOUNDS[animal];
+    if (sound) return `A ${animal} typically says “${sound}.”`;
+  }
+  if (/^(?:what(?:'s| is) )?the longest word(?: in (?:english|history))?$/i.test(q) || /longest word in history/i.test(q)) {
+    return 'There is no single universally accepted “longest word.” In English dictionaries, **pneumonoultramicroscopicsilicovolcanoconiosis** (45 letters) is commonly cited as one of the longest. Systematic chemical names can be vastly longer, so the answer depends on what counts as a word.';
+  }
+  return null;
+}
+
 async function loadGenerator(showProgress = false) {
   if (generator) return generator;
   if (generatorPromise) return generatorPromise;
   generatorPromise = (async () => {
-    if (showProgress) setStatus('Preparing local AI', 'Loading the local model. The first visit takes longer; later visits use the browser cache.', 64);
+    if (showProgress) setStatus('Preparing local AI', 'First load downloads the local Qwen model. It is cached for later searches.', 64);
     transformersModule ||= await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/+esm');
     const { pipeline } = transformersModule;
     generator = await pipeline('text-generation', AI_MODEL, { device: 'wasm', dtype: 'q4' });
@@ -172,31 +192,57 @@ async function loadGenerator(showProgress = false) {
 function looksTimeSensitive(query) {
   return /\b(today|now|current|currently|latest|recent|recently|news|price|cost|weather|score|release|version|update|best|recommend|202[4-9])\b/i.test(query);
 }
-function buildPrompt(query, results) {
-  const context = results.slice(0, 5).map((r, i) => `[${i + 1}] ${r.title}: ${(r.snippet || 'No snippet.').slice(0, 420)}`).join('\n');
-  const grounding = looksTimeSensitive(query)
-    ? 'This question may depend on current information. Base the answer on the useful sources below, cite source numbers like [1], and say when the sources are insufficient.'
-    : 'For simple timeless/common-knowledge questions, answer directly from your general knowledge. Use the sources only when they actually help. Ignore irrelevant search results; never repeat unrelated titles or snippets.';
-  return `You are Plexity, a helpful AI search assistant. ${grounding}\nBe direct. Start with the actual answer, not background. Keep it under 90 words unless more detail is needed.\n\nQuestion: ${query}\n\nSearch results:\n${context || 'No useful web snippets were returned.'}\n\nAnswer:`;
+function usefulSources(results) {
+  return results.filter(r => (r._score || 0) >= 5 && r.snippet).slice(0, 5);
 }
-function extractGeneratedText(output, prompt) {
+function buildMessages(query, results) {
+  const current = looksTimeSensitive(query);
+  const sources = usefulSources(results);
+  const sourceText = sources.map((r, i) => `[${i + 1}] ${r.title}: ${r.snippet.slice(0, 450)}`).join('\n');
+
+  const system = current
+    ? 'You are Plexity, an accurate AI search assistant. The question may depend on current information. Use only useful supplied web snippets for current claims. Cite them as [1], [2], etc. If they do not support an answer, say that clearly. Ignore irrelevant sources. Answer directly and concisely.'
+    : 'You are Plexity, a helpful and accurate assistant. For timeless/common-knowledge questions, answer from your own knowledge. Do not let irrelevant search snippets distract you. If useful snippets are provided, you may use them, but do not copy unrelated text. Answer the exact question first. Keep the answer concise.';
+
+  const user = current
+    ? `Question: ${query}\n\nWeb snippets:\n${sourceText || 'No sufficiently relevant web snippets were found.'}`
+    : `Question: ${query}${sourceText ? `\n\nPotentially useful web snippets (ignore any that are irrelevant):\n${sourceText}` : ''}`;
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user }
+  ];
+}
+function extractChatAnswer(output) {
   const value = output?.[0]?.generated_text;
   if (Array.isArray(value)) {
-    const last = value[value.length - 1];
-    return String(last?.content || '').trim();
+    for (let i = value.length - 1; i >= 0; i--) {
+      if (value[i]?.role === 'assistant' && value[i]?.content) return String(value[i].content).trim();
+    }
+    return String(value[value.length - 1]?.content || '').trim();
   }
-  const text = String(value || '').trim();
-  if (text.startsWith(prompt)) return text.slice(prompt.length).trim();
-  return text;
+  return String(value || '').trim();
 }
 function cleanModelAnswer(text) {
-  return String(text || '')
-    .replace(/^answer\s*:\s*/i, '')
+  let out = String(text || '')
     .replace(/<\|.*?\|>/g, '')
+    .replace(/^assistant\s*[:\n]\s*/i, '')
+    .replace(/^answer\s*:\s*/i, '')
     .trim();
+  const repeated = out.match(/^(.{12,120}?)(?:\n\s*\1){2,}/s);
+  if (repeated) out = repeated[1].trim();
+  return out;
 }
 
 async function generateAnswer(query, results, searchId) {
+  const instant = directAnswer(query);
+  if (instant) {
+    els.answerCard.classList.remove('hidden');
+    els.answerText.textContent = instant;
+    els.answerMeta.textContent = 'Instant answer · local AI not needed for this simple question.';
+    return;
+  }
+
   els.answerCard.classList.remove('hidden');
   els.answerText.textContent = 'Thinking…';
   els.answerMeta.textContent = generator ? 'Local AI is answering…' : 'Preparing local AI…';
@@ -204,20 +250,21 @@ async function generateAnswer(query, results, searchId) {
   const pipe = await loadGenerator(!generator);
   if (searchId !== activeSearch) return;
   setStatus('Writing answer', 'Local AI is answering your question…', 92);
-  const prompt = buildPrompt(query, results);
-  const output = await pipe(prompt, {
-    max_new_tokens: 90,
+
+  const messages = buildMessages(query, results);
+  const output = await pipe(messages, {
+    max_new_tokens: looksTimeSensitive(query) ? 140 : 110,
     do_sample: false,
-    repetition_penalty: 1.12
+    repetition_penalty: 1.15
   });
   if (searchId !== activeSearch) return;
 
-  const text = cleanModelAnswer(extractGeneratedText(output, prompt));
+  const text = cleanModelAnswer(extractChatAnswer(output));
   if (!text || text.length < 2) throw new Error('The local model returned an empty answer.');
   els.answerText.textContent = text;
   els.answerMeta.textContent = looksTimeSensitive(query)
-    ? 'Answered locally with web context · verify important/current details in the sources.'
-    : 'Answered locally in your browser · no AI API used.';
+    ? 'Answered locally with relevant web context · check sources for current details.'
+    : 'Answered locally with Qwen2.5 0.5B · no AI API used.';
 }
 
 async function runSearch(query) {
@@ -229,6 +276,13 @@ async function runSearch(query) {
   els.answerMeta.textContent = '';
   els.sourceList.innerHTML = '';
   els.sourceCount.textContent = '0';
+
+  const instant = mode === 'ai' ? directAnswer(query) : null;
+  if (instant) {
+    els.answerCard.classList.remove('hidden');
+    els.answerText.textContent = instant;
+    els.answerMeta.textContent = 'Instant answer · fetching sources in the background.';
+  }
   setStatus('Searching', 'Fetching sources…', 18);
 
   try {
@@ -238,20 +292,26 @@ async function runSearch(query) {
     clearStatus();
 
     if (mode === 'ai') {
-      generateAnswer(query, results, searchId).catch(err => {
-        if (searchId !== activeSearch) return;
-        console.error('Local AI failed:', err);
-        els.answerCard.classList.remove('hidden');
-        els.answerText.textContent = 'I could not generate a reliable answer on this device. The search results are still available.';
-        els.answerMeta.textContent = 'Local AI failed safely instead of showing a random web snippet.';
-        clearStatus();
-      }).finally(() => { if (searchId === activeSearch) clearStatus(); });
+      if (instant) {
+        els.answerMeta.textContent = 'Instant answer · simple question answered without waiting for the local model.';
+      } else {
+        generateAnswer(query, results, searchId).catch(err => {
+          if (searchId !== activeSearch) return;
+          console.error('Local AI failed:', err);
+          els.answerCard.classList.remove('hidden');
+          els.answerText.textContent = 'I could not generate a reliable answer on this device. The search results are still available.';
+          els.answerMeta.textContent = 'Local AI failed safely instead of showing nonsense.';
+          clearStatus();
+        }).finally(() => { if (searchId === activeSearch) clearStatus(); });
+      }
     }
   } catch (err) {
     if (searchId !== activeSearch) return;
     renderSources([]);
-    els.answerCard.classList.remove('hidden');
-    els.answerText.innerHTML = `<span class="error">Search failed:</span> ${escapeHtml(err.message)}`;
+    if (!instant) {
+      els.answerCard.classList.remove('hidden');
+      els.answerText.innerHTML = `<span class="error">Search failed:</span> ${escapeHtml(err.message)}`;
+    }
     clearStatus();
   }
 }
@@ -271,4 +331,4 @@ els.saveSettingsBtn.addEventListener('click', () => { saveSettings(); setMode(se
 
 hydrateSettings();
 detectRuntime();
-setTimeout(preloadAI, 350);
+setTimeout(preloadAI, 700);
