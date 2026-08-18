@@ -9,8 +9,9 @@ const els = {
   saveSettingsBtn: $('#saveSettingsBtn'), newSearchBtn: $('#newSearchBtn')
 };
 
-const AI_MODEL = 'onnx-community/SmolLM-135M-Instruct-ONNX';
+const AI_MODEL = 'onnx-community/SmolLM2-360M-Instruct-ONNX';
 const defaults = { searx: '', defaultAi: true };
+const STOP_WORDS = new Set(['a','an','the','is','are','was','were','what','which','who','when','where','why','how','does','do','did','make','of','to','for','in','on','at','and','or','it','this','that']);
 let settings = loadSettings();
 let mode = settings.defaultAi ? 'ai' : 'search';
 let generator = null;
@@ -32,17 +33,15 @@ function hydrateSettings() {
   els.defaultAi.checked = settings.defaultAi;
   setMode(settings.defaultAi ? 'ai' : 'search');
   if (els.modelSelect) {
-    els.modelSelect.innerHTML = '<option value="wasm">Fast & compatible — SmolLM 135M (~181 MB)</option>';
+    els.modelSelect.innerHTML = '<option value="wasm">Balanced local AI — SmolLM2 360M</option>';
     els.modelSelect.disabled = true;
   }
 }
-
 function detectRuntime() {
-  els.gpuBadge.textContent = 'Local AI · compatible mode';
+  els.gpuBadge.textContent = 'Local AI · CPU/WASM';
   els.gpuBadge.classList.remove('error');
   els.gpuBadge.classList.add('ok');
 }
-
 function setMode(next) {
   mode = next;
   $$('.mode').forEach(b => b.classList.toggle('active', b.dataset.mode === next));
@@ -61,6 +60,7 @@ function showResults(query) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 function resetHome() {
+  ++activeSearch;
   els.results.classList.add('hidden');
   els.hero.classList.remove('hidden');
   els.input.focus();
@@ -70,6 +70,29 @@ function normalizeUrl(url) { try { return new URL(url).href; } catch { return '#
 function domainOf(url) { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'source'; } }
 function stripHtml(text = '') { const div = document.createElement('div'); div.innerHTML = text; return div.textContent || ''; }
 function escapeHtml(s = '') { return String(s).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+function queryTokens(query) {
+  return [...new Set(query.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(w => w.length > 1 && !STOP_WORDS.has(w)))];
+}
+function scoreResult(query, r) {
+  const tokens = queryTokens(query);
+  const title = String(r.title || '').toLowerCase();
+  const snippet = String(r.snippet || '').toLowerCase();
+  const q = query.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  let score = 0;
+  if (q && title.includes(q)) score += 20;
+  if (q && snippet.includes(q)) score += 10;
+  for (const token of tokens) {
+    if (title.includes(token)) score += 5;
+    if (snippet.includes(token)) score += 2;
+  }
+  if (snippet.length > 60) score += 1;
+  return score;
+}
+function rankResults(query, results) {
+  return results.map((r, index) => ({ r, index, score: scoreResult(query, r) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map(x => x.r);
+}
 
 function renderSources(results) {
   els.sourceCount.textContent = results.length;
@@ -93,7 +116,7 @@ async function fetchSearx(query) {
   const res = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(`SearXNG HTTP ${res.status}`);
   const data = await res.json();
-  return (data.results || []).slice(0, 10).map(r => ({ title: r.title, url: r.url, snippet: stripHtml(r.content || '') }));
+  return (data.results || []).slice(0, 12).map(r => ({ title: r.title, url: r.url, snippet: stripHtml(r.content || '') }));
 }
 async function fetchWikipedia(query) {
   const res = await fetch(`https://en.wikipedia.org/w/rest.php/v1/search/page?q=${encodeURIComponent(query)}&limit=8`);
@@ -112,7 +135,7 @@ async function fetchDuckDuckGo(query) {
   const out = [];
   if (data.AbstractURL && data.AbstractText) out.push({ title: data.Heading || query, url: data.AbstractURL, snippet: data.AbstractText });
   const flatten = topics => topics.flatMap(t => t.Topics ? flatten(t.Topics) : [t]);
-  for (const t of flatten(data.RelatedTopics || []).slice(0, 7)) {
+  for (const t of flatten(data.RelatedTopics || []).slice(0, 10)) {
     if (t.FirstURL && t.Text) out.push({ title: t.Text.split(' - ')[0], url: t.FirstURL, snippet: t.Text });
   }
   return out;
@@ -123,48 +146,39 @@ async function searchWeb(query) {
     for (const r of items) {
       if (!r?.url || seen.has(r.url)) continue;
       seen.add(r.url); combined.push(r);
-      if (combined.length >= 10) break;
     }
   };
-
   const jobs = [fetchDuckDuckGo(query), fetchWikipedia(query)];
   if (settings.searx) jobs.unshift(fetchSearx(query));
   const settled = await Promise.allSettled(jobs);
   for (const result of settled) if (result.status === 'fulfilled') add(result.value);
-  return combined.slice(0, 10);
-}
-
-function quickAnswer(results) {
-  const useful = results.find(r => r.snippet && r.snippet.length > 35);
-  if (!useful) return 'I found the web results, but there is not enough useful text in the snippets to give a quick answer yet.';
-  return `${useful.snippet} [${results.indexOf(useful) + 1}]`;
+  return rankResults(query, combined).slice(0, 10);
 }
 
 async function loadGenerator(showProgress = false) {
   if (generator) return generator;
   if (generatorPromise) return generatorPromise;
-
   generatorPromise = (async () => {
-    if (showProgress) setStatus('Preparing local AI', 'First use downloads a small ~181 MB model. It is cached for later searches.', 65);
+    if (showProgress) setStatus('Preparing local AI', 'Loading the local model. The first visit takes longer; later visits use the browser cache.', 64);
     transformersModule ||= await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/+esm');
     const { pipeline } = transformersModule;
-    const pipe = await pipeline('text-generation', AI_MODEL, {
-      device: 'wasm',
-      dtype: 'q4'
-    });
-    generator = pipe;
-    return pipe;
+    generator = await pipeline('text-generation', AI_MODEL, { device: 'wasm', dtype: 'q4' });
+    return generator;
   })();
-
   try { return await generatorPromise; }
   finally { generatorPromise = null; }
 }
 
-function buildPrompt(query, results) {
-  const context = results.slice(0, 6).map((r, i) => `[${i + 1}] ${r.title}: ${r.snippet || 'No snippet.'}`).join('\n');
-  return `You are Plexity, a concise web search assistant. Answer the question using ONLY the search snippets below. Cite claims with [1], [2], etc. If the snippets do not support an answer, say so. Keep the answer under 120 words.\n\nQuestion: ${query}\n\nSources:\n${context}\n\nAnswer:`;
+function looksTimeSensitive(query) {
+  return /\b(today|now|current|currently|latest|recent|recently|news|price|cost|weather|score|release|version|update|best|recommend|202[4-9])\b/i.test(query);
 }
-
+function buildPrompt(query, results) {
+  const context = results.slice(0, 5).map((r, i) => `[${i + 1}] ${r.title}: ${(r.snippet || 'No snippet.').slice(0, 420)}`).join('\n');
+  const grounding = looksTimeSensitive(query)
+    ? 'This question may depend on current information. Base the answer on the useful sources below, cite source numbers like [1], and say when the sources are insufficient.'
+    : 'For simple timeless/common-knowledge questions, answer directly from your general knowledge. Use the sources only when they actually help. Ignore irrelevant search results; never repeat unrelated titles or snippets.';
+  return `You are Plexity, a helpful AI search assistant. ${grounding}\nBe direct. Start with the actual answer, not background. Keep it under 90 words unless more detail is needed.\n\nQuestion: ${query}\n\nSearch results:\n${context || 'No useful web snippets were returned.'}\n\nAnswer:`;
+}
 function extractGeneratedText(output, prompt) {
   const value = output?.[0]?.generated_text;
   if (Array.isArray(value)) {
@@ -175,27 +189,35 @@ function extractGeneratedText(output, prompt) {
   if (text.startsWith(prompt)) return text.slice(prompt.length).trim();
   return text;
 }
+function cleanModelAnswer(text) {
+  return String(text || '')
+    .replace(/^answer\s*:\s*/i, '')
+    .replace(/<\|.*?\|>/g, '')
+    .trim();
+}
 
 async function generateAnswer(query, results, searchId) {
   els.answerCard.classList.remove('hidden');
-  els.answerText.textContent = quickAnswer(results);
-  els.answerMeta.textContent = 'Quick answer from web snippets · local AI is refining this…';
+  els.answerText.textContent = 'Thinking…';
+  els.answerMeta.textContent = generator ? 'Local AI is answering…' : 'Preparing local AI…';
 
-  const pipe = await loadGenerator(true);
+  const pipe = await loadGenerator(!generator);
   if (searchId !== activeSearch) return;
-  setStatus('Refining answer', 'Local AI is summarizing the sources…', 92);
-
+  setStatus('Writing answer', 'Local AI is answering your question…', 92);
   const prompt = buildPrompt(query, results);
   const output = await pipe(prompt, {
-    max_new_tokens: 110,
+    max_new_tokens: 90,
     do_sample: false,
-    repetition_penalty: 1.08
+    repetition_penalty: 1.12
   });
   if (searchId !== activeSearch) return;
 
-  const text = extractGeneratedText(output, prompt);
-  if (text) els.answerText.textContent = text;
-  els.answerMeta.textContent = 'Generated locally with SmolLM 135M on CPU/WASM. No AI API key used.';
+  const text = cleanModelAnswer(extractGeneratedText(output, prompt));
+  if (!text || text.length < 2) throw new Error('The local model returned an empty answer.');
+  els.answerText.textContent = text;
+  els.answerMeta.textContent = looksTimeSensitive(query)
+    ? 'Answered locally with web context · verify important/current details in the sources.'
+    : 'Answered locally in your browser · no AI API used.';
 }
 
 async function runSearch(query) {
@@ -216,13 +238,12 @@ async function runSearch(query) {
     clearStatus();
 
     if (mode === 'ai') {
-      els.answerCard.classList.remove('hidden');
-      els.answerText.textContent = quickAnswer(results);
-      els.answerMeta.textContent = 'Quick answer shown instantly · preparing local AI refinement…';
       generateAnswer(query, results, searchId).catch(err => {
         if (searchId !== activeSearch) return;
-        console.error('Local AI refinement failed:', err);
-        els.answerMeta.textContent = 'Quick answer from web snippets · local AI refinement was unavailable.';
+        console.error('Local AI failed:', err);
+        els.answerCard.classList.remove('hidden');
+        els.answerText.textContent = 'I could not generate a reliable answer on this device. The search results are still available.';
+        els.answerMeta.textContent = 'Local AI failed safely instead of showing a random web snippet.';
         clearStatus();
       }).finally(() => { if (searchId === activeSearch) clearStatus(); });
     }
@@ -250,5 +271,4 @@ els.saveSettingsBtn.addEventListener('click', () => { saveSettings(); setMode(se
 
 hydrateSettings();
 detectRuntime();
-if ('requestIdleCallback' in window) requestIdleCallback(preloadAI, { timeout: 2500 });
-else setTimeout(preloadAI, 1200);
+setTimeout(preloadAI, 350);
