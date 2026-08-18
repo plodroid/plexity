@@ -109,9 +109,9 @@
       <label>
         <span>AI model</span>
         <select id="modelSelect">
-          <option value="wasm">Fast & compatible — SmolLM 135M (~181 MB)</option>
+          <option value="wasm">Balanced local AI — SmolLM2 360M</option>
         </select>
-        <small>Runs locally with CPU/WASM for broad browser and GPU compatibility. Plexity preloads it in the background and caches it after first use.</small>
+        <small>Runs locally with CPU/WASM for broad compatibility. Plexity starts loading it shortly after the page opens and caches it after first use.</small>
       </label>
 
       <label>
@@ -123,7 +123,7 @@
       <label class="toggle-row">
         <span>
           <b>Use AI by default</b>
-          <small>Show an instant source-grounded answer, then refine it locally.</small>
+          <small>Generate a direct local answer after the web results load.</small>
         </span>
         <input id="defaultAi" type="checkbox" checked />
       </label>
