@@ -1,13 +1,12 @@
-const SEARCH_TIMEOUT = 4200;
-const PAGE_TIMEOUT = 3000;
-const MAX_SEARCH_RESULTS = 80;
-const MAX_FIRST_HOP = 30;
-const MAX_SECOND_HOP = 20;
-const MAX_BODY_BYTES = 700_000;
+const SEARCH_TIMEOUT = 5500;
+const PAGE_TIMEOUT = 4000;
+const READER_TIMEOUT = 11000;
+const MAX_RESULTS = 50;
+const MAX_INSPECT = 14;
+const MAX_READER_FALLBACKS = 4;
 const CACHE_TTL = 30 * 60 * 1000;
-const STALE_CACHE_TTL = 6 * 60 * 60 * 1000;
 
-const resultCache = new Map();
+const cache = new Map();
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -17,33 +16,23 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
   }
 });
 
-function cleanHtml(text = '') {
-  return String(text)
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;|&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+const browserHeaders = {
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36',
+  'accept-language': 'en-US,en;q=0.9',
+  'accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.6'
+};
 
 function normalizeUrl(url = '', base) {
   try {
     const u = new URL(url, base);
+    if (!/^https?:$/.test(u.protocol)) return '';
     u.hash = '';
     for (const key of [...u.searchParams.keys()]) {
       if (/^(utm_|ref$|ref_|source$|campaign$|fbclid$|gclid$)/i.test(key)) u.searchParams.delete(key);
     }
-    const q = u.searchParams.toString();
-    return `${u.origin}${u.pathname.replace(/\/+$/, '')}${q ? `?${q}` : ''}`;
+    return u.toString().replace(/\/$/, '');
   } catch {
-    return String(url).trim();
+    return '';
   }
 }
 
@@ -52,22 +41,65 @@ function hostOf(url = '') {
   catch { return ''; }
 }
 
-function isUsefulUrl(url = '') {
-  try {
-    const u = new URL(url);
-    if (!/^https?:$/.test(u.protocol)) return false;
-    const h = u.hostname.toLowerCase();
-    return ![
-      'duckduckgo.com','html.duckduckgo.com','lite.duckduckgo.com',
-      'bing.com','www.bing.com','google.com','www.google.com',
-      'search.yahoo.com','r.search.yahoo.com','yahoo.com','www.yahoo.com'
-    ].includes(h);
-  } catch { return false; }
+function isSearchHost(url = '') {
+  const h = hostOf(url).toLowerCase();
+  return [
+    'google.com','www.google.com','bing.com','www.bing.com',
+    'duckduckgo.com','html.duckduckgo.com','lite.duckduckgo.com',
+    'search.yahoo.com','yahoo.com','www.yahoo.com','r.jina.ai'
+  ].includes(h);
 }
 
-async function fetchWithTimeout(url, options = {}, ms = SEARCH_TIMEOUT) {
+function isUsefulUrl(url = '') {
+  return !!normalizeUrl(url) && !isSearchHost(url);
+}
+
+function escapeRegex(value = '') {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function usernameRegex(username, global = false) {
+  const token = escapeRegex(username);
+  return new RegExp(`(^|[^a-z0-9._-])@?${token}(?=$|[^a-z0-9._-])`, global ? 'ig' : 'i');
+}
+
+function hasUsername(value, username) {
+  if (!value) return false;
+  let text = String(value);
+  try { text = decodeURIComponent(text); } catch {}
+  return usernameRegex(username).test(text);
+}
+
+function countUsername(value, username) {
+  const matches = String(value || '').match(usernameRegex(username, true));
+  return Math.min(matches?.length || 0, 50);
+}
+
+function cleanText(value = '') {
+  return String(value)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&#x27;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function contextAround(text, username, radius = 150) {
+  const clean = cleanText(text);
+  const match = clean.match(usernameRegex(username));
+  if (!match || match.index == null) return '';
+  const start = Math.max(0, match.index - radius);
+  const end = Math.min(clean.length, match.index + match[0].length + radius);
+  return `${start ? '…' : ''}${clean.slice(start, end).trim()}${end < clean.length ? '…' : ''}`;
+}
+
+async function fetchWithTimeout(url, options = {}, timeout = SEARCH_TIMEOUT) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
+  const timer = setTimeout(() => controller.abort(), timeout);
   try {
     return await fetch(url, { ...options, signal: controller.signal, redirect: 'follow' });
   } finally {
@@ -75,333 +107,194 @@ async function fetchWithTimeout(url, options = {}, ms = SEARCH_TIMEOUT) {
   }
 }
 
-const browserHeaders = {
-  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36',
-  'accept-language': 'en-US,en;q=0.9',
-  'accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.6'
-};
+function parseMarkdownLinks(markdown, username, engine = 'Jina Reader') {
+  const out = [];
+  const seen = new Set();
+  for (const m of String(markdown || '').matchAll(/\[([^\]]{1,180})\]\((https?:\/\/[^\s)]+)\)/g)) {
+    const url = normalizeUrl(m[2]);
+    if (!url || !isUsefulUrl(url)) continue;
+    const title = cleanText(m[1]);
+    const key = url.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
 
-async function readLimited(res, maxBytes = MAX_BODY_BYTES) {
-  const length = Number(res.headers.get('content-length') || 0);
-  if (length && length > maxBytes * 2) return '';
-  if (!res.body?.getReader) return (await res.text()).slice(0, maxBytes);
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let total = 0;
-  let text = '';
-  try {
-    while (total < maxBytes) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      text += decoder.decode(value, { stream: true });
-      if (total >= maxBytes) break;
-    }
-    text += decoder.decode();
-  } finally {
-    try { await reader.cancel(); } catch {}
-  }
-  return text.slice(0, maxBytes);
-}
-
-function decodeMaybe(value = '') {
-  let out = String(value || '');
-  for (let i = 0; i < 2; i++) {
-    try {
-      const next = decodeURIComponent(out);
-      if (next === out) break;
-      out = next;
-    } catch { break; }
-  }
-  return out;
-}
-
-function usernamePattern(username) {
-  const escaped = String(username).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(^|[^a-z0-9._-])@?${escaped}(?=$|[^a-z0-9._-])`, 'i');
-}
-
-function hasUsername(value, username) {
-  if (!value) return false;
-  const decoded = decodeMaybe(String(value)).replace(/\\u002f/gi, '/').replace(/\\u0040/gi, '@');
-  return usernamePattern(username).test(decoded);
-}
-
-function exactUrlUsernameScore(url, username) {
-  try {
-    const u = new URL(url);
-    const needle = username.toLowerCase();
     let score = 0;
-    const hostParts = u.hostname.toLowerCase().split('.');
-    if (hostParts.includes(needle)) score += 9;
-    const segments = u.pathname.split('/').filter(Boolean).map(x => decodeMaybe(x).toLowerCase());
-    if (segments.some(s => s === needle || s === `@${needle}`)) score += 10;
-    for (const [k, v] of u.searchParams) {
-      if (decodeMaybe(v).toLowerCase() === needle) score += 8;
-      if (decodeMaybe(k).toLowerCase() === needle) score += 4;
-    }
-    return score;
-  } catch { return 0; }
-}
+    if (hasUsername(url, username)) score += 10;
+    if (hasUsername(title, username)) score += 5;
+    if (score === 0) continue;
 
-function decodeDuckUrl(raw = '') {
-  try {
-    const value = raw.startsWith('//') ? `https:${raw}` : raw;
-    const u = new URL(value, 'https://duckduckgo.com');
-    const target = u.searchParams.get('uddg');
-    return normalizeUrl(target ? decodeURIComponent(target) : u.href);
-  } catch { return normalizeUrl(raw); }
-}
-
-function parseDuck(html) {
-  const out = [];
-  const matches = [...html.matchAll(/<a\b[^>]*class=["'][^"']*result__a[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
-  for (const m of matches) {
-    const url = decodeDuckUrl(m[1]);
-    if (!isUsefulUrl(url)) continue;
-    const after = html.slice(m.index + m[0].length, m.index + m[0].length + 2200);
-    const snippet = after.match(/class=["'][^"']*result__snippet[^"']*["'][^>]*>([\s\S]*?)<\/(?:a|div|td)>/i)?.[1] || '';
-    out.push({ title: cleanHtml(m[2]), url, snippet: cleanHtml(snippet), engine: 'DuckDuckGo' });
+    out.push({ title: title || hostOf(url), url, snippet: '', engine, searchScore: score });
+    if (out.length >= 30) break;
   }
   return out;
 }
 
-function parseBing(html) {
-  const out = [];
-  const blocks = html.split(/<li[^>]+class=["'][^"']*b_algo[^"']*["'][^>]*>/i).slice(1);
-  for (const block of blocks) {
-    const link = block.match(/<h2[^>]*>\s*<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
-    if (!link) continue;
-    const url = normalizeUrl(link[1]);
-    if (!isUsefulUrl(url)) continue;
-    const snippet = block.match(/<p[^>]*>([\s\S]*?)<\/p>/i)?.[1] || '';
-    out.push({ title: cleanHtml(link[2]), url, snippet: cleanHtml(snippet), engine: 'Bing' });
+async function readerSearch(username) {
+  const query = `"${username}" OR "@${username}"`;
+  const targets = [
+    `https://www.google.com/search?q=${encodeURIComponent(query)}&num=20`,
+    `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=20`
+  ];
+
+  for (const target of targets) {
+    try {
+      const res = await fetchWithTimeout(`https://r.jina.ai/${target}`, {
+        headers: { 'accept': 'text/plain', 'user-agent': 'Plexity/4.0' }
+      }, READER_TIMEOUT);
+      if (!res.ok) continue;
+      const text = await res.text();
+      const parsed = parseMarkdownLinks(text, username, 'Jina Reader');
+      if (parsed.length) return parsed;
+    } catch {}
   }
-  return out;
+  return [];
 }
 
-function parseYahoo(html) {
+function parseDuck(html, username) {
   const out = [];
-  const links = [...html.matchAll(/<h3[^>]*>\s*<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
-  for (const m of links) {
+  for (const m of html.matchAll(/<a\b[^>]*class=["'][^"']*result__a[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
     let url = m[1];
     try {
-      const u = new URL(url, 'https://search.yahoo.com');
-      const ru = u.searchParams.get('RU');
-      if (ru) url = decodeURIComponent(ru);
+      const u = new URL(url.startsWith('//') ? `https:${url}` : url, 'https://duckduckgo.com');
+      const uddg = u.searchParams.get('uddg');
+      if (uddg) url = decodeURIComponent(uddg);
     } catch {}
     url = normalizeUrl(url);
-    if (!isUsefulUrl(url)) continue;
-    const after = html.slice(m.index + m[0].length, m.index + m[0].length + 1800);
-    const snippet = after.match(/<p[^>]*>([\s\S]*?)<\/p>/i)?.[1] || '';
-    out.push({ title: cleanHtml(m[2]), url, snippet: cleanHtml(snippet), engine: 'Yahoo' });
+    if (!url || !isUsefulUrl(url)) continue;
+    const title = cleanText(m[2]);
+    let score = 0;
+    if (hasUsername(url, username)) score += 10;
+    if (hasUsername(title, username)) score += 5;
+    if (!score) continue;
+    out.push({ title, url, snippet: '', engine: 'DuckDuckGo', searchScore: score });
   }
   return out;
 }
 
-async function searchDuck(query) {
+async function directSearch(username) {
   try {
-    const res = await fetchWithTimeout(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, { headers: browserHeaders });
+    const q = `"${username}" OR "@${username}"`;
+    const res = await fetchWithTimeout(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, { headers: browserHeaders });
     if (!res.ok) return [];
-    return parseDuck(await res.text());
-  } catch { return []; }
+    return parseDuck(await res.text(), username);
+  } catch {
+    return [];
+  }
 }
 
-async function searchBing(query) {
-  try {
-    const res = await fetchWithTimeout(`https://www.bing.com/search?q=${encodeURIComponent(query)}&count=30`, { headers: browserHeaders });
-    if (!res.ok) return [];
-    return parseBing(await res.text());
-  } catch { return []; }
-}
-
-async function searchYahoo(query) {
-  try {
-    const res = await fetchWithTimeout(`https://search.yahoo.com/search?p=${encodeURIComponent(query)}&n=20`, { headers: browserHeaders });
-    if (!res.ok) return [];
-    return parseYahoo(await res.text());
-  } catch { return []; }
-}
-
-function baseSearchScore(result, username) {
-  let score = exactUrlUsernameScore(result.url, username);
-  if (hasUsername(result.url, username)) score += 5;
-  if (hasUsername(result.title, username)) score += 4;
-  if (hasUsername(result.snippet, username)) score += 3;
-  return score;
-}
-
-function dedupeSearch(items, username) {
+function dedupe(items) {
   const map = new Map();
   for (const item of items) {
-    if (!item?.url || !isUsefulUrl(item.url)) continue;
-    const key = normalizeUrl(item.url).toLowerCase();
-    const score = baseSearchScore(item, username);
+    const url = normalizeUrl(item?.url || '');
+    if (!url || !isUsefulUrl(url)) continue;
+    const key = url.toLowerCase();
     const prev = map.get(key);
-    if (!prev || score > prev.searchScore) map.set(key, { ...item, searchScore: score });
+    if (!prev || (item.searchScore || 0) > (prev.searchScore || 0)) map.set(key, { ...item, url });
   }
-  return [...map.values()]
-    .sort((a, b) => b.searchScore - a.searchScore)
-    .slice(0, MAX_SEARCH_RESULTS);
+  return [...map.values()].sort((a, b) => (b.searchScore || 0) - (a.searchScore || 0));
 }
 
-async function runSearchJobs(jobs) {
-  const settled = await Promise.allSettled(jobs);
-  return settled.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+async function discover(username) {
+  const key = username.toLowerCase();
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.at < CACHE_TTL) return cached.results;
+
+  const [reader, direct] = await Promise.all([readerSearch(username), directSearch(username)]);
+  const results = dedupe([...reader, ...direct]).slice(0, MAX_RESULTS);
+  if (results.length) cache.set(key, { at: Date.now(), results });
+  return results;
 }
 
-async function searchWeb(username) {
-  // Stage 1: only three requests. Hammering public engines with dozens of
-  // parallel requests causes their anti-bot systems to block later searches.
-  let combined = await runSearchJobs([
-    searchDuck(username),
-    searchBing(`"${username}"`),
-    searchYahoo(`@${username}`)
-  ]);
-
-  let deduped = dedupeSearch(combined, username);
-  if (deduped.length >= 12) return deduped;
-
-  // Stage 2: a small fallback batch only when discovery is weak.
-  combined.push(...await runSearchJobs([
-    searchDuck(`"@${username}"`),
-    searchBing(`${username} profile`),
-    searchYahoo(`"${username}"`)
-  ]));
-
-  deduped = dedupeSearch(combined, username);
-  if (deduped.length >= 8) return deduped;
-
-  // Stage 3: last-resort targeted queries. Still far below the old 33-request burst.
-  combined.push(...await runSearchJobs([
-    searchDuck(`inurl:${username}`),
-    searchBing(`${username} account`),
-    searchYahoo(`${username} username`)
-  ]));
-
-  return dedupeSearch(combined, username);
+function extractTitle(html, fallback = '') {
+  return cleanText(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || fallback);
 }
 
-function countNeedle(text, username) {
-  const source = decodeMaybe(String(text || ''));
-  const pattern = usernamePattern(username);
-  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
-  const global = new RegExp(pattern.source, flags);
-  let count = 0;
-  while (global.exec(source) && count < 100) count++;
-  return count;
-}
-
-function contextAround(text, username, radius = 130) {
-  const source = cleanHtml(text);
-  const match = source.match(usernamePattern(username));
-  if (!match || match.index == null) return '';
-  const i = match.index;
-  const start = Math.max(0, i - radius);
-  const end = Math.min(source.length, i + match[0].length + radius);
-  return `${start ? '…' : ''}${source.slice(start, end).trim()}${end < source.length ? '…' : ''}`;
-}
-
-function extractMeta(html, name) {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const a = html.match(new RegExp(`<meta[^>]+(?:name|property)=["']${escaped}["'][^>]+content=["']([^"']*)["']`, 'i'));
-  const b = html.match(new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:name|property)=["']${escaped}["']`, 'i'));
-  return cleanHtml(a?.[1] || b?.[1] || '');
-}
-
-function extractLinks(html, baseUrl, username) {
+function extractLinksFromHtml(html, baseUrl, username) {
   const out = [];
-  for (const m of html.matchAll(/<a\b([^>]*)href=["']([^"'#]+)["']([^>]*)>([\s\S]*?)<\/a>/gi)) {
-    const url = normalizeUrl(m[2], baseUrl);
-    if (!isUsefulUrl(url)) continue;
-    const label = cleanHtml(m[4]);
-    const attrs = `${m[1]} ${m[3]}`;
-    if (!hasUsername(url, username) && !hasUsername(label, username) && !hasUsername(attrs, username)) continue;
-    out.push({ url, title: label || hostOf(url), snippet: '', engine: 'Page link' });
-    if (out.length >= 40) break;
+  for (const m of html.matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    const url = normalizeUrl(m[1], baseUrl);
+    if (!url || !isUsefulUrl(url)) continue;
+    const label = cleanText(m[2]);
+    if (!hasUsername(url, username) && !hasUsername(label, username)) continue;
+    out.push({ title: label || hostOf(url), url, snippet: '', engine: 'Page link', searchScore: hasUsername(url, username) ? 10 : 5 });
+    if (out.length >= 12) break;
   }
   return out;
 }
 
-function evidenceScore({ finalUrl, rawHtml, text, title, description, canonical, ogUrl }, username) {
-  let score = exactUrlUsernameScore(finalUrl, username);
-  const locations = [];
-  const add = (name, value, points) => {
-    if (hasUsername(value, username)) {
-      score += points;
-      locations.push(name);
-    }
-  };
-  add('url', finalUrl, 7);
-  add('canonical', canonical, 7);
-  add('og:url', ogUrl, 6);
-  add('title', title, 5);
-  add('description', description, 3);
-  const textHits = countNeedle(text, username);
-  const htmlHits = countNeedle(rawHtml, username);
-  if (textHits) {
-    score += Math.min(12, 3 + textHits);
-    locations.push('page text');
+async function inspectDirect(item, username) {
+  try {
+    const res = await fetchWithTimeout(item.url, { headers: browserHeaders }, PAGE_TIMEOUT);
+    if (!res.ok && res.status >= 400) return null;
+    const type = (res.headers.get('content-type') || '').toLowerCase();
+    if (!type.includes('text') && !type.includes('html')) return null;
+    const html = (await res.text()).slice(0, 650000);
+    const finalUrl = normalizeUrl(res.url || item.url);
+    const title = extractTitle(html, item.title);
+    const text = cleanText(html);
+    const hits = countUsername(`${finalUrl} ${title} ${text}`, username);
+    if (!hits) return null;
+
+    const score = (hasUsername(finalUrl, username) ? 12 : 0) + (hasUsername(title, username) ? 6 : 0) + Math.min(10, hits);
+    return {
+      ...item,
+      url: finalUrl || item.url,
+      title: title || item.title || hostOf(finalUrl),
+      snippet: contextAround(text, username) || item.snippet || '',
+      status: 'found',
+      statusCode: res.status,
+      deepScore: score + (item.searchScore || 0),
+      hits,
+      linked: extractLinksFromHtml(html, finalUrl, username)
+    };
+  } catch {
+    return null;
   }
-  if (!textHits && htmlHits) {
-    score += Math.min(8, 2 + htmlHits);
-    locations.push('page source');
-  }
-  return { score, locations: [...new Set(locations)], hits: Math.max(textHits, htmlHits) };
 }
 
-async function inspectPage(result, username) {
+async function inspectReader(item, username) {
   try {
-    const res = await fetchWithTimeout(result.url, { headers: browserHeaders }, PAGE_TIMEOUT);
-    const type = (res.headers.get('content-type') || '').toLowerCase();
-    if (!(type.includes('text/html') || type.includes('text/plain') || type.includes('application/xhtml'))) {
-      return { ...result, status: 'unknown', deepScore: result.searchScore || 0, linked: [] };
-    }
-    const html = await readLimited(res);
-    if (!html) return { ...result, status: 'unknown', deepScore: result.searchScore || 0, linked: [] };
-    const finalUrl = normalizeUrl(res.url || result.url);
-    const title = cleanHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || result.title || '');
-    const description = extractMeta(html, 'description') || extractMeta(html, 'og:description') || result.snippet || '';
-    const canonical = normalizeUrl(html.match(/<link[^>]+rel=["'][^"']*canonical[^"']*["'][^>]+href=["']([^"']+)["']/i)?.[1] || '', finalUrl);
-    const ogUrl = normalizeUrl(extractMeta(html, 'og:url') || '', finalUrl);
-    const text = cleanHtml(html);
-    const evidence = evidenceScore({ finalUrl, rawHtml: html, text, title, description, canonical, ogUrl }, username);
-    const linked = extractLinks(html, finalUrl, username);
-    const snippet = contextAround(text, username) || description || result.snippet || '';
+    const res = await fetchWithTimeout(`https://r.jina.ai/${item.url}`, {
+      headers: { 'accept': 'text/plain', 'user-agent': 'Plexity/4.0' }
+    }, READER_TIMEOUT);
+    if (!res.ok) return null;
+    const text = (await res.text()).slice(0, 500000);
+    const hits = countUsername(`${item.url} ${text}`, username);
+    if (!hits) return null;
+    const linked = parseMarkdownLinks(text, username, 'Page link').slice(0, 10);
     return {
-      ...result,
-      url: finalUrl || result.url,
-      title: title || result.title || hostOf(finalUrl),
-      snippet,
-      statusCode: res.status,
-      status: res.ok && evidence.score >= 5 ? 'found' : 'unknown',
-      deepScore: evidence.score + (result.searchScore || 0),
-      evidence: evidence.locations,
-      hits: evidence.hits,
+      ...item,
+      title: item.title || hostOf(item.url),
+      snippet: contextAround(text, username),
+      status: 'found',
+      deepScore: (hasUsername(item.url, username) ? 12 : 0) + Math.min(10, hits) + (item.searchScore || 0),
+      hits,
       linked
     };
   } catch {
-    return { ...result, status: 'unknown', deepScore: result.searchScore || 0, linked: [] };
+    return null;
   }
 }
 
-async function inspectBatch(items, username, limit) {
-  const chosen = items.slice(0, limit);
-  const settled = await Promise.allSettled(chosen.map(item => inspectPage(item, username)));
-  return settled.map((r, i) => r.status === 'fulfilled' ? r.value : { ...chosen[i], status: 'unknown', deepScore: chosen[i].searchScore || 0, linked: [] });
-}
+async function inspectCandidates(items, username) {
+  const chosen = items.slice(0, MAX_INSPECT);
+  const direct = await Promise.all(chosen.map(item => inspectDirect(item, username)));
+  const out = [];
+  let readerFallbacks = 0;
 
-function mergeResults(items, username) {
-  const map = new Map();
-  for (const item of items) {
-    if (!item?.url || !isUsefulUrl(item.url)) continue;
-    const key = normalizeUrl(item.url).toLowerCase();
-    const prev = map.get(key);
-    const score = item.deepScore ?? item.searchScore ?? baseSearchScore(item, username);
-    const normalized = { ...item, deepScore: score };
-    if (!prev || (normalized.status === 'found' && prev.status !== 'found') || score > (prev.deepScore || 0)) map.set(key, normalized);
+  for (let i = 0; i < chosen.length; i++) {
+    if (direct[i]) {
+      out.push(direct[i]);
+      continue;
+    }
+    if (readerFallbacks < MAX_READER_FALLBACKS) {
+      readerFallbacks++;
+      const viaReader = await inspectReader(chosen[i], username);
+      if (viaReader) out.push(viaReader);
+    }
   }
-  return [...map.values()];
+
+  return out;
 }
 
 function toUiResult(result) {
@@ -414,81 +307,56 @@ function toUiResult(result) {
     status: result.status || 'unknown',
     statusCode: result.statusCode || null,
     score: result.deepScore || result.searchScore || 0,
-    evidence: result.evidence || [],
     hits: result.hits || 0
   };
 }
 
-function getCached(username, maxAge = CACHE_TTL) {
-  const cached = resultCache.get(username.toLowerCase());
-  if (!cached || Date.now() - cached.at > maxAge) return null;
-  return cached.data;
-}
-
-function setCached(username, data) {
-  if (data?.results?.length) resultCache.set(username.toLowerCase(), { at: Date.now(), data });
-}
-
 export default async (req) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
+
   let body;
   try { body = await req.json(); }
   catch { return json({ error: 'Invalid JSON' }, 400); }
+
   const username = String(body?.username || '').trim().replace(/^@+/, '').slice(0, 64);
   if (!username) return json({ error: 'Missing username' }, 400);
 
-  const freshCache = getCached(username);
-  if (freshCache) return json({ ...freshCache, cached: true });
-
   try {
-    const discovered = await searchWeb(username);
-
-    // If every public engine suddenly returns nothing, it is usually temporary
-    // throttling. Reuse a slightly older successful result rather than lying with 0.
+    const discovered = await discover(username);
     if (!discovered.length) {
-      const stale = getCached(username, STALE_CACHE_TTL);
-      if (stale) return json({ ...stale, cached: true, stale: true });
       return json({
         username,
         checked: 0,
         found: 0,
         unknown: 0,
         results: [],
-        source: 'public web search engines',
-        temporarilyLimited: true
+        source: 'web discovery returned no candidates'
       });
     }
 
-    const firstHop = await inspectBatch(discovered, username, MAX_FIRST_HOP);
-    const linkedCandidates = dedupeSearch(
-      firstHop.flatMap(r => r.linked || []),
-      username
-    ).filter(link => !firstHop.some(r => normalizeUrl(r.url).toLowerCase() === normalizeUrl(link.url).toLowerCase()));
-    const secondHop = await inspectBatch(linkedCandidates, username, MAX_SECOND_HOP);
-    const merged = mergeResults([...firstHop, ...secondHop], username);
+    const firstHop = await inspectCandidates(discovered, username);
+    const secondCandidates = dedupe(firstHop.flatMap(r => r.linked || [])).filter(link =>
+      !firstHop.some(r => normalizeUrl(r.url).toLowerCase() === normalizeUrl(link.url).toLowerCase())
+    ).slice(0, 6);
+    const secondHop = await inspectCandidates(secondCandidates, username);
+
+    const merged = dedupe([...firstHop, ...secondHop]);
     const results = merged
-      .filter(r => r.status === 'found' || (r.searchScore || 0) >= 3)
-      .sort((a, b) => {
-        if (a.status !== b.status) return a.status === 'found' ? -1 : 1;
-        return (b.deepScore || 0) - (a.deepScore || 0);
-      })
-      .slice(0, 70)
+      .filter(r => r.status === 'found')
+      .sort((a, b) => (b.deepScore || 0) - (a.deepScore || 0))
+      .slice(0, 50)
       .map(toUiResult);
 
-    const payload = {
+    return json({
       username,
       checked: firstHop.length + secondHop.length,
-      found: results.filter(r => r.status === 'found').length,
-      unknown: results.filter(r => r.status === 'unknown').length,
+      found: results.length,
+      unknown: 0,
       results,
-      source: 'staged web search + full-page token scan + one-hop matching links'
-    };
-    setCached(username, payload);
-    return json(payload);
+      source: 'Jina Reader + direct web discovery + full-page inspection'
+    });
   } catch (error) {
     console.error(error);
-    const stale = getCached(username, STALE_CACHE_TTL);
-    if (stale) return json({ ...stale, cached: true, stale: true });
     return json({ error: error?.message || 'Search failed' }, 500);
   }
 };
