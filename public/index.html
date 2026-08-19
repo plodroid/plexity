@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="Plexity — Sherlock-style public username discovery." />
+  <meta name="theme-color" content="#1b1b18" />
+  <title>Plexity — Username Search</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span></span><span></span></div>
+  <div class="grain-overlay" aria-hidden="true"></div>
+
+  <header class="app-bar glass-control">
+    <a class="brand" href="/" aria-label="Plexity home">
+      <span class="brand-mark">P</span>
+      <span class="brand-name">Plexity</span>
+    </a>
+    <div class="header-actions">
+      <span class="privacy-pill">Public profiles only</span>
+      <button class="icon-button" id="themeToggle" type="button" aria-label="Toggle theme">
+        <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="hero" id="hero">
+      <p class="eyebrow">USERNAME DISCOVERY</p>
+      <h1>Find the same handle<br><em>across the web.</em></h1>
+      <p class="hero-copy">A clean Sherlock-style search for public accounts. Enter one username and Plexity checks hundreds of public profile patterns.</p>
+
+      <form id="searchForm" class="search-glass glass-control" autocomplete="off">
+        <span class="search-at">@</span>
+        <input id="usernameInput" maxlength="64" spellcheck="false" placeholder="plodroid" aria-label="Username" />
+        <button class="search-button" type="submit">
+          <span>Search</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+      </form>
+
+      <div class="quick-searches">
+        <span>Try</span>
+        <button type="button" data-example="plodroid">plodroid</button>
+        <button type="button" data-example="openai">openai</button>
+        <button type="button" data-example="torvalds">torvalds</button>
+      </div>
+
+      <div class="trust-row">
+        <div><strong>400+</strong><span>Sherlock site definitions</span></div>
+        <div><strong>0</strong><span>Accounts required</span></div>
+        <div><strong>Public</strong><span>URLs only</span></div>
+      </div>
+    </section>
+
+    <section class="results hidden" id="resultsView">
+      <div class="results-intro">
+        <button class="text-button" id="backBtn" type="button">← New search</button>
+        <p class="eyebrow">SEARCH RESULTS</p>
+        <div class="result-title-row">
+          <div>
+            <h2 id="resultTitle">@username</h2>
+            <p id="summary">Preparing scan…</p>
+          </div>
+          <div class="stats" aria-label="Scan statistics">
+            <article><strong id="foundCount">0</strong><span>Found</span></article>
+            <article><strong id="unknownCount">0</strong><span>Unclear</span></article>
+            <article><strong id="checkedCount">0</strong><span>Checked</span></article>
+          </div>
+        </div>
+      </div>
+
+      <div class="scan-status glass-control" id="scanStatus">
+        <div class="status-copy">
+          <span class="pulse-dot"></span>
+          <span id="progressText">Starting scan…</span>
+        </div>
+        <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+      </div>
+
+      <div class="toolbar glass-control">
+        <div class="segmented" role="group" aria-label="Result filters">
+          <button class="filter active" data-filter="found" type="button">Found</button>
+          <button class="filter" data-filter="unknown" type="button">Unclear</button>
+          <button class="filter" data-filter="all" type="button">All checked</button>
+        </div>
+        <label class="filter-search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+          <input id="filterInput" placeholder="Filter sites" />
+        </label>
+      </div>
+
+      <div class="result-grid" id="resultGrid"></div>
+      <div class="empty hidden" id="emptyState">
+        <div class="empty-icon">@</div>
+        <h3>No results in this view</h3>
+        <p>Try another filter or username.</p>
+      </div>
+
+      <section class="method-note">
+        <span class="method-icon">i</span>
+        <div>
+          <h3>How a match is decided</h3>
+          <p>Plexity uses Sherlock’s public site definitions: status codes, known “not found” messages, redirect targets and public probe URLs. A matching username across multiple sites does not prove the accounts belong to the same person.</p>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer>Public username discovery <span>·</span> No login bypasses <span>·</span> No private data</footer>
+  <script src="app.js"></script>
+</body>
+</html>
