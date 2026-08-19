@@ -27,17 +27,16 @@ function hydrateSettings() {
   if (els.searxEndpoint) {
     els.searxEndpoint.value = '';
     els.searxEndpoint.disabled = true;
-    els.searxEndpoint.placeholder = 'Handled by Plexity backend';
+    els.searxEndpoint.placeholder = 'Handled by Plexity Cloudflare backend';
   }
   if (els.modelSelect) {
-    els.modelSelect.innerHTML = '<option value="server">Netlify AI Gateway — server AI</option>';
+    els.modelSelect.innerHTML = '<option value="server">Cloudflare Workers AI — Llama 3.2 3B</option>';
     els.modelSelect.disabled = true;
   }
   setMode(settings.defaultAi ? 'ai' : 'search');
 }
 function setRuntimeBadge() {
-  const onNetlify = location.hostname.endsWith('.netlify.app') || location.hostname.includes('netlify');
-  els.gpuBadge.textContent = onNetlify ? 'Plexity AI · server mode' : 'Plexity · backend pending';
+  els.gpuBadge.textContent = 'Plexity · Cloudflare Workers AI';
   els.gpuBadge.classList.remove('error');
   els.gpuBadge.classList.add('ok');
 }
@@ -96,18 +95,30 @@ function directAnswer(query) {
   return null;
 }
 
+function apiEndpoint() {
+  const configured = String(window.PLEXITY_API_URL || '').trim();
+  return configured || '/api/search';
+}
+
 async function callBackend(query) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
   try {
-    const res = await fetch('/api/search', {
+    const res = await fetch(apiEndpoint(), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, mode }),
       signal: controller.signal
     });
-    if (!res.ok) throw new Error(`Backend HTTP ${res.status}`);
-    return await res.json();
+
+    let data = null;
+    try { data = await res.json(); } catch {}
+
+    if (!res.ok && !(data?.aiUnavailable && Array.isArray(data?.sources))) {
+      throw new Error(data?.error || `Backend HTTP ${res.status}`);
+    }
+
+    return data || {};
   } finally {
     clearTimeout(timer);
   }
@@ -142,35 +153,41 @@ async function runSearch(query) {
     els.answerMeta.textContent = 'Instant answer · checking web sources…';
   }
 
-  setStatus('Searching', 'Plexity is searching and preparing an answer…', 25);
+  setStatus('Searching', mode === 'ai' ? 'Plexity is searching and preparing an AI answer…' : 'Plexity is searching the web…', 25);
   try {
     const data = await callBackend(query);
     if (searchId !== activeSearch) return;
     renderSources(data.sources || []);
+
     if (mode === 'ai') {
       els.answerCard.classList.remove('hidden');
       if (data.answer) {
         els.answerText.textContent = data.answer;
-        els.answerMeta.textContent = 'Answered by Plexity server AI with web context.';
+        els.answerMeta.textContent = 'Answered by Cloudflare Workers AI with live web context.';
       } else if (instant) {
         els.answerText.textContent = instant;
-        els.answerMeta.textContent = data.aiUnavailable ? 'Free AI quota unavailable · instant answer shown instead.' : 'Instant answer.';
+        els.answerMeta.textContent = data.aiLimited
+          ? 'Cloudflare free AI quota reached · instant answer shown instead.'
+          : 'Instant answer.';
+      } else if (data.aiLimited) {
+        els.answerText.textContent = 'The free Cloudflare AI quota is currently exhausted, but your search results are ready.';
+        els.answerMeta.textContent = 'Plexity hard-stops at the free limit instead of using paid AI.';
       } else {
-        els.answerText.textContent = 'AI is temporarily unavailable, but your search results are ready.';
-        els.answerMeta.textContent = 'Plexity stops at the free limit instead of charging.';
+        els.answerText.textContent = 'Cloudflare Workers AI is temporarily unavailable, but your search results are ready.';
+        els.answerMeta.textContent = 'Search fallback is still active.';
       }
     }
   } catch (err) {
-    console.warn('Plexity backend unavailable:', err);
+    console.warn('Plexity Cloudflare backend unavailable:', err);
     const sources = await fallbackWikipedia(query).catch(() => []);
     if (searchId !== activeSearch) return;
     renderSources(sources);
     if (mode === 'ai' && !instant) {
       els.answerCard.classList.remove('hidden');
-      els.answerText.textContent = 'The server AI backend is not connected on this deployment yet. Search results still work.';
-      els.answerMeta.textContent = 'Deploy this repo on Netlify to enable zero-billing server AI.';
+      els.answerText.textContent = 'The Cloudflare backend is not connected on this deployment yet. Wikipedia fallback still works.';
+      els.answerMeta.textContent = 'Deploy the Worker and point PLEXITY_API_URL at /api/search.';
     } else if (instant) {
-      els.answerMeta.textContent = 'Instant answer · server backend is not connected on this deployment yet.';
+      els.answerMeta.textContent = 'Instant answer · Cloudflare backend is not connected on this deployment yet.';
     }
   } finally {
     if (searchId === activeSearch) clearStatus();
