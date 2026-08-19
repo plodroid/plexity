@@ -4,6 +4,10 @@ const MAX_SEARCH_RESULTS = 80;
 const MAX_FIRST_HOP = 30;
 const MAX_SECOND_HOP = 20;
 const MAX_BODY_BYTES = 700_000;
+const CACHE_TTL = 30 * 60 * 1000;
+const STALE_CACHE_TTL = 6 * 60 * 60 * 1000;
+
+const resultCache = new Map();
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -114,9 +118,6 @@ function decodeMaybe(value = '') {
 
 function usernamePattern(username) {
   const escaped = String(username).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // Username characters are usually letters, numbers, dot, underscore or dash.
-  // This keeps plodroid from matching something like xplodroid2 while still
-  // matching @plodroid, /plodroid, user=plodroid, plain text, etc.
   return new RegExp(`(^|[^a-z0-9._-])@?${escaped}(?=$|[^a-z0-9._-])`, 'i');
 }
 
@@ -244,24 +245,41 @@ function dedupeSearch(items, username) {
     .slice(0, MAX_SEARCH_RESULTS);
 }
 
-async function searchWeb(username) {
-  const queries = [
-    username,
-    `"${username}"`,
-    `@${username}`,
-    `"@${username}"`,
-    `${username} profile`,
-    `${username} account`,
-    `${username} username`,
-    `inurl:${username}`,
-    `site:github.com ${username}`,
-    `site:youtube.com ${username}`,
-    `site:reddit.com ${username}`
-  ];
-  const jobs = [];
-  for (const q of queries) jobs.push(searchDuck(q), searchBing(q), searchYahoo(q));
+async function runSearchJobs(jobs) {
   const settled = await Promise.allSettled(jobs);
-  return dedupeSearch(settled.flatMap(r => r.status === 'fulfilled' ? r.value : []), username);
+  return settled.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+}
+
+async function searchWeb(username) {
+  // Stage 1: only three requests. Hammering public engines with dozens of
+  // parallel requests causes their anti-bot systems to block later searches.
+  let combined = await runSearchJobs([
+    searchDuck(username),
+    searchBing(`"${username}"`),
+    searchYahoo(`@${username}`)
+  ]);
+
+  let deduped = dedupeSearch(combined, username);
+  if (deduped.length >= 12) return deduped;
+
+  // Stage 2: a small fallback batch only when discovery is weak.
+  combined.push(...await runSearchJobs([
+    searchDuck(`"@${username}"`),
+    searchBing(`${username} profile`),
+    searchYahoo(`"${username}"`)
+  ]));
+
+  deduped = dedupeSearch(combined, username);
+  if (deduped.length >= 8) return deduped;
+
+  // Stage 3: last-resort targeted queries. Still far below the old 33-request burst.
+  combined.push(...await runSearchJobs([
+    searchDuck(`inurl:${username}`),
+    searchBing(`${username} account`),
+    searchYahoo(`${username} username`)
+  ]));
+
+  return dedupeSearch(combined, username);
 }
 
 function countNeedle(text, username) {
@@ -401,6 +419,16 @@ function toUiResult(result) {
   };
 }
 
+function getCached(username, maxAge = CACHE_TTL) {
+  const cached = resultCache.get(username.toLowerCase());
+  if (!cached || Date.now() - cached.at > maxAge) return null;
+  return cached.data;
+}
+
+function setCached(username, data) {
+  if (data?.results?.length) resultCache.set(username.toLowerCase(), { at: Date.now(), data });
+}
+
 export default async (req) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
   let body;
@@ -408,8 +436,29 @@ export default async (req) => {
   catch { return json({ error: 'Invalid JSON' }, 400); }
   const username = String(body?.username || '').trim().replace(/^@+/, '').slice(0, 64);
   if (!username) return json({ error: 'Missing username' }, 400);
+
+  const freshCache = getCached(username);
+  if (freshCache) return json({ ...freshCache, cached: true });
+
   try {
     const discovered = await searchWeb(username);
+
+    // If every public engine suddenly returns nothing, it is usually temporary
+    // throttling. Reuse a slightly older successful result rather than lying with 0.
+    if (!discovered.length) {
+      const stale = getCached(username, STALE_CACHE_TTL);
+      if (stale) return json({ ...stale, cached: true, stale: true });
+      return json({
+        username,
+        checked: 0,
+        found: 0,
+        unknown: 0,
+        results: [],
+        source: 'public web search engines',
+        temporarilyLimited: true
+      });
+    }
+
     const firstHop = await inspectBatch(discovered, username, MAX_FIRST_HOP);
     const linkedCandidates = dedupeSearch(
       firstHop.flatMap(r => r.linked || []),
@@ -425,16 +474,21 @@ export default async (req) => {
       })
       .slice(0, 70)
       .map(toUiResult);
-    return json({
+
+    const payload = {
       username,
       checked: firstHop.length + secondHop.length,
       found: results.filter(r => r.status === 'found').length,
       unknown: results.filter(r => r.status === 'unknown').length,
       results,
-      source: 'web search + full-page token scan + one-hop matching links'
-    });
+      source: 'staged web search + full-page token scan + one-hop matching links'
+    };
+    setCached(username, payload);
+    return json(payload);
   } catch (error) {
     console.error(error);
+    const stale = getCached(username, STALE_CACHE_TTL);
+    if (stale) return json({ ...stale, cached: true, stale: true });
     return json({ error: error?.message || 'Search failed' }, 500);
   }
 };
