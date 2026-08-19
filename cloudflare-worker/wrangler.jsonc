@@ -6,7 +6,8 @@
   "ai": {
     "binding": "AI"
   },
-  "vars": {
-    "ALLOWED_ORIGIN": "https://plodroid.github.io"
+  "limits": {
+    "cpu_ms": 10,
+    "subrequests": 5
   }
 }
