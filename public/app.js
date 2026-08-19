@@ -20,8 +20,11 @@ function escapeHtml(v = '') {
   return String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-function hostOf(url) {
-  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
+function displayUrl(url) {
+  try {
+    const u = new URL(url);
+    return `${u.hostname.replace(/^www\./, '')}${u.pathname}${u.search}`.replace(/\/$/, '');
+  } catch { return url; }
 }
 
 function initials(name) {
@@ -42,7 +45,7 @@ function startProgress() {
 function finishProgress(ok = true) {
   clearInterval(progressTimer);
   els.progress.style.width = '100%';
-  els.progressText.textContent = ok ? 'Scan complete' : 'Scan failed';
+  els.progressText.textContent = ok ? 'Search complete' : 'Search failed';
 }
 
 function setFilter(next) {
@@ -55,7 +58,8 @@ function render() {
   const needle = els.filterInput.value.trim().toLowerCase();
   const visible = results.filter(r => {
     const byState = activeFilter === 'all' || r.status === activeFilter;
-    const byText = !needle || r.site.toLowerCase().includes(needle) || r.url.toLowerCase().includes(needle);
+    const haystack = `${r.site || ''} ${r.title || ''} ${r.url || ''} ${r.snippet || ''}`.toLowerCase();
+    const byText = !needle || haystack.includes(needle);
     return byState && byText;
   });
 
@@ -64,10 +68,10 @@ function render() {
     <a class="result-card" href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">
       <div class="site-icon">${escapeHtml(initials(r.site))}</div>
       <div class="result-info">
-        <strong>${escapeHtml(r.site)}</strong>
-        <span class="result-url">${escapeHtml(hostOf(r.url))}${r.statusCode ? ` · HTTP ${escapeHtml(r.statusCode)}` : ''}</span>
+        <strong>${escapeHtml(r.title || r.site)}</strong>
+        <span class="result-url">${escapeHtml(displayUrl(r.url))}${r.statusCode ? ` · HTTP ${escapeHtml(r.statusCode)}` : ''}</span>
       </div>
-      <span class="status ${escapeHtml(r.status)}">${r.status === 'found' ? 'Found' : r.status === 'unknown' ? 'Unclear' : 'Not found'}</span>
+      <span class="status ${escapeHtml(r.status)}">${r.status === 'found' ? 'Found' : r.status === 'unknown' ? 'Possible' : 'Not found'}</span>
       <svg class="result-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg>
     </a>
   `).join('');
@@ -98,8 +102,8 @@ async function runSearch(raw) {
   els.found.textContent = '0';
   els.unknown.textContent = '0';
   els.checked.textContent = '0';
-  els.summary.textContent = 'Checking Sherlock site definitions…';
-  els.progressText.textContent = 'Scanning public profile URLs…';
+  els.summary.textContent = 'Searching the public web…';
+  els.progressText.textContent = 'Searching indexes and verifying likely profiles…';
   startProgress();
 
   try {
@@ -120,17 +124,19 @@ async function runSearch(raw) {
     els.unknown.textContent = String(unknown);
     els.checked.textContent = String(checked);
     els.summary.textContent = found
-      ? `${found} public ${found === 1 ? 'profile' : 'profiles'} found across ${checked} checked sites.`
-      : `No confirmed profiles found across ${checked} checked sites.`;
+      ? `${found} strong ${found === 1 ? 'match' : 'matches'} found from public web results${unknown ? ` · ${unknown} possible` : ''}.`
+      : unknown
+        ? `No strong matches yet · ${unknown} possible web ${unknown === 1 ? 'result' : 'results'} found.`
+        : 'No matching public web results were found.';
     finishProgress(true);
     render();
   } catch (error) {
     console.error(error);
     finishProgress(false);
-    els.summary.textContent = 'The Netlify scanner did not respond.';
+    els.summary.textContent = 'The Netlify search function did not respond.';
     els.empty.classList.remove('hidden');
-    els.empty.querySelector('h3').textContent = 'Scanner unavailable';
-    els.empty.querySelector('p').textContent = 'Make sure this site is deployed on Netlify so /api/search can run.';
+    els.empty.querySelector('h3').textContent = 'Search unavailable';
+    els.empty.querySelector('p').textContent = 'Make sure the latest Netlify deployment is live, then try again.';
   }
 }
 
