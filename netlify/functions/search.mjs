@@ -1,8 +1,8 @@
 const SEARCH_TIMEOUT = 4200;
 const PAGE_TIMEOUT = 3000;
-const MAX_SEARCH_RESULTS = 70;
-const MAX_FIRST_HOP = 28;
-const MAX_SECOND_HOP = 18;
+const MAX_SEARCH_RESULTS = 80;
+const MAX_FIRST_HOP = 30;
+const MAX_SECOND_HOP = 20;
 const MAX_BODY_BYTES = 700_000;
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
@@ -81,7 +81,6 @@ async function readLimited(res, maxBytes = MAX_BODY_BYTES) {
   const length = Number(res.headers.get('content-length') || 0);
   if (length && length > maxBytes * 2) return '';
   if (!res.body?.getReader) return (await res.text()).slice(0, maxBytes);
-
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let total = 0;
@@ -99,6 +98,49 @@ async function readLimited(res, maxBytes = MAX_BODY_BYTES) {
     try { await reader.cancel(); } catch {}
   }
   return text.slice(0, maxBytes);
+}
+
+function decodeMaybe(value = '') {
+  let out = String(value || '');
+  for (let i = 0; i < 2; i++) {
+    try {
+      const next = decodeURIComponent(out);
+      if (next === out) break;
+      out = next;
+    } catch { break; }
+  }
+  return out;
+}
+
+function usernamePattern(username) {
+  const escaped = String(username).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Username characters are usually letters, numbers, dot, underscore or dash.
+  // This keeps plodroid from matching something like xplodroid2 while still
+  // matching @plodroid, /plodroid, user=plodroid, plain text, etc.
+  return new RegExp(`(^|[^a-z0-9._-])@?${escaped}(?=$|[^a-z0-9._-])`, 'i');
+}
+
+function hasUsername(value, username) {
+  if (!value) return false;
+  const decoded = decodeMaybe(String(value)).replace(/\\u002f/gi, '/').replace(/\\u0040/gi, '@');
+  return usernamePattern(username).test(decoded);
+}
+
+function exactUrlUsernameScore(url, username) {
+  try {
+    const u = new URL(url);
+    const needle = username.toLowerCase();
+    let score = 0;
+    const hostParts = u.hostname.toLowerCase().split('.');
+    if (hostParts.includes(needle)) score += 9;
+    const segments = u.pathname.split('/').filter(Boolean).map(x => decodeMaybe(x).toLowerCase());
+    if (segments.some(s => s === needle || s === `@${needle}`)) score += 10;
+    for (const [k, v] of u.searchParams) {
+      if (decodeMaybe(v).toLowerCase() === needle) score += 8;
+      if (decodeMaybe(k).toLowerCase() === needle) score += 4;
+    }
+    return score;
+  } catch { return 0; }
 }
 
 function decodeDuckUrl(raw = '') {
@@ -181,15 +223,10 @@ async function searchYahoo(query) {
 }
 
 function baseSearchScore(result, username) {
-  const needle = username.toLowerCase();
-  const title = String(result.title || '').toLowerCase();
-  const snippet = String(result.snippet || '').toLowerCase();
-  const url = String(result.url || '').toLowerCase();
-  let score = 0;
-  if (url.includes(needle)) score += 4;
-  if (url.includes(`@${needle}`)) score += 4;
-  if (title.includes(needle)) score += 2;
-  if (snippet.includes(needle)) score += 1;
+  let score = exactUrlUsernameScore(result.url, username);
+  if (hasUsername(result.url, username)) score += 5;
+  if (hasUsername(result.title, username)) score += 4;
+  if (hasUsername(result.snippet, username)) score += 3;
   return score;
 }
 
@@ -209,12 +246,17 @@ function dedupeSearch(items, username) {
 
 async function searchWeb(username) {
   const queries = [
+    username,
     `"${username}"`,
+    `@${username}`,
     `"@${username}"`,
     `${username} profile`,
     `${username} account`,
     `${username} username`,
-    `inurl:${username} ${username}`
+    `inurl:${username}`,
+    `site:github.com ${username}`,
+    `site:youtube.com ${username}`,
+    `site:reddit.com ${username}`
   ];
   const jobs = [];
   for (const q of queries) jobs.push(searchDuck(q), searchBing(q), searchYahoo(q));
@@ -223,25 +265,22 @@ async function searchWeb(username) {
 }
 
 function countNeedle(text, username) {
-  const hay = String(text || '').toLowerCase();
-  const needle = username.toLowerCase();
-  if (!needle) return 0;
+  const source = decodeMaybe(String(text || ''));
+  const pattern = usernamePattern(username);
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
+  const global = new RegExp(pattern.source, flags);
   let count = 0;
-  let pos = 0;
-  while ((pos = hay.indexOf(needle, pos)) !== -1 && count < 100) {
-    count++;
-    pos += needle.length;
-  }
+  while (global.exec(source) && count < 100) count++;
   return count;
 }
 
-function contextAround(text, username, radius = 120) {
+function contextAround(text, username, radius = 130) {
   const source = cleanHtml(text);
-  const lower = source.toLowerCase();
-  const i = lower.indexOf(username.toLowerCase());
-  if (i < 0) return '';
+  const match = source.match(usernamePattern(username));
+  if (!match || match.index == null) return '';
+  const i = match.index;
   const start = Math.max(0, i - radius);
-  const end = Math.min(source.length, i + username.length + radius);
+  const end = Math.min(source.length, i + match[0].length + radius);
   return `${start ? '…' : ''}${source.slice(start, end).trim()}${end < source.length ? '…' : ''}`;
 }
 
@@ -254,48 +293,42 @@ function extractMeta(html, name) {
 
 function extractLinks(html, baseUrl, username) {
   const out = [];
-  const needle = username.toLowerCase();
-  for (const m of html.matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
-    const url = normalizeUrl(m[1], baseUrl);
+  for (const m of html.matchAll(/<a\b([^>]*)href=["']([^"'#]+)["']([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    const url = normalizeUrl(m[2], baseUrl);
     if (!isUsefulUrl(url)) continue;
-    const label = cleanHtml(m[2]);
-    const hay = `${url} ${label}`.toLowerCase();
-    if (!hay.includes(needle)) continue;
+    const label = cleanHtml(m[4]);
+    const attrs = `${m[1]} ${m[3]}`;
+    if (!hasUsername(url, username) && !hasUsername(label, username) && !hasUsername(attrs, username)) continue;
     out.push({ url, title: label || hostOf(url), snippet: '', engine: 'Page link' });
-    if (out.length >= 30) break;
+    if (out.length >= 40) break;
   }
   return out;
 }
 
 function evidenceScore({ finalUrl, rawHtml, text, title, description, canonical, ogUrl }, username) {
-  const needle = username.toLowerCase();
-  let score = 0;
+  let score = exactUrlUsernameScore(finalUrl, username);
   const locations = [];
-
   const add = (name, value, points) => {
-    if (String(value || '').toLowerCase().includes(needle)) {
+    if (hasUsername(value, username)) {
       score += points;
       locations.push(name);
     }
   };
-
-  add('url', finalUrl, 8);
+  add('url', finalUrl, 7);
   add('canonical', canonical, 7);
   add('og:url', ogUrl, 6);
   add('title', title, 5);
   add('description', description, 3);
-
   const textHits = countNeedle(text, username);
   const htmlHits = countNeedle(rawHtml, username);
   if (textHits) {
-    score += Math.min(10, 3 + textHits);
+    score += Math.min(12, 3 + textHits);
     locations.push('page text');
   }
   if (!textHits && htmlHits) {
-    score += Math.min(6, 2 + htmlHits);
+    score += Math.min(8, 2 + htmlHits);
     locations.push('page source');
   }
-
   return { score, locations: [...new Set(locations)], hits: Math.max(textHits, htmlHits) };
 }
 
@@ -306,10 +339,8 @@ async function inspectPage(result, username) {
     if (!(type.includes('text/html') || type.includes('text/plain') || type.includes('application/xhtml'))) {
       return { ...result, status: 'unknown', deepScore: result.searchScore || 0, linked: [] };
     }
-
     const html = await readLimited(res);
     if (!html) return { ...result, status: 'unknown', deepScore: result.searchScore || 0, linked: [] };
-
     const finalUrl = normalizeUrl(res.url || result.url);
     const title = cleanHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || result.title || '');
     const description = extractMeta(html, 'description') || extractMeta(html, 'og:description') || result.snippet || '';
@@ -319,7 +350,6 @@ async function inspectPage(result, username) {
     const evidence = evidenceScore({ finalUrl, rawHtml: html, text, title, description, canonical, ogUrl }, username);
     const linked = extractLinks(html, finalUrl, username);
     const snippet = contextAround(text, username) || description || result.snippet || '';
-
     return {
       ...result,
       url: finalUrl || result.url,
@@ -351,7 +381,7 @@ function mergeResults(items, username) {
     const prev = map.get(key);
     const score = item.deepScore ?? item.searchScore ?? baseSearchScore(item, username);
     const normalized = { ...item, deepScore: score };
-    if (!prev || normalized.status === 'found' && prev.status !== 'found' || score > (prev.deepScore || 0)) map.set(key, normalized);
+    if (!prev || (normalized.status === 'found' && prev.status !== 'found') || score > (prev.deepScore || 0)) map.set(key, normalized);
   }
   return [...map.values()];
 }
@@ -373,43 +403,35 @@ function toUiResult(result) {
 
 export default async (req) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
-
   let body;
   try { body = await req.json(); }
   catch { return json({ error: 'Invalid JSON' }, 400); }
-
   const username = String(body?.username || '').trim().replace(/^@+/, '').slice(0, 64);
   if (!username) return json({ error: 'Missing username' }, 400);
-
   try {
     const discovered = await searchWeb(username);
     const firstHop = await inspectBatch(discovered, username, MAX_FIRST_HOP);
-
     const linkedCandidates = dedupeSearch(
       firstHop.flatMap(r => r.linked || []),
       username
     ).filter(link => !firstHop.some(r => normalizeUrl(r.url).toLowerCase() === normalizeUrl(link.url).toLowerCase()));
-
     const secondHop = await inspectBatch(linkedCandidates, username, MAX_SECOND_HOP);
     const merged = mergeResults([...firstHop, ...secondHop], username);
-
-    // Keep actual deep matches first. Search-only/blocked pages remain Unclear instead of being faked as Found.
     const results = merged
-      .filter(r => r.status === 'found' || (r.searchScore || 0) >= 4)
+      .filter(r => r.status === 'found' || (r.searchScore || 0) >= 3)
       .sort((a, b) => {
         if (a.status !== b.status) return a.status === 'found' ? -1 : 1;
         return (b.deepScore || 0) - (a.deepScore || 0);
       })
-      .slice(0, 60)
+      .slice(0, 70)
       .map(toUiResult);
-
     return json({
       username,
       checked: firstHop.length + secondHop.length,
       found: results.filter(r => r.status === 'found').length,
       unknown: results.filter(r => r.status === 'unknown').length,
       results,
-      source: 'web search + full-page deep scan + one-hop matching links'
+      source: 'web search + full-page token scan + one-hop matching links'
     });
   } catch (error) {
     console.error(error);
