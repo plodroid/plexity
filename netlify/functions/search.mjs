@@ -87,8 +87,18 @@ function rank(query, items) {
 }
 
 function promptFor(query, sources) {
-  const sourceText = sources.slice(0, 6).map((s, i) => `[${i + 1}] ${s.title}\n${s.snippet}\n${s.url}`).join('\n\n');
-  return `You are Plexity, an accurate AI search assistant. Answer the user's exact question first. Use the web snippets below for current or factual claims and cite them inline as [1], [2], etc. Ignore irrelevant snippets. If the sources are insufficient, say so instead of inventing facts. Keep the answer concise and useful.\n\nQuestion: ${query}\n\nSources:\n${sourceText || 'No useful sources were found.'}`;
+  const useful = sources.filter(s => (s._score || 0) > 0).slice(0, 5);
+  const sourceText = useful.map((s, i) => `[${i + 1}] ${s.title}\n${(s.snippet || '').slice(0, 320)}\n${s.url}`).join('\n\n');
+  return `You are Plexity, an accurate AI search assistant. Answer the user's exact question first. For current or factual claims, use the useful web snippets below and cite them inline as [1], [2], etc. Ignore irrelevant snippets. If the sources are insufficient, say so instead of inventing facts. Keep the answer concise and useful, ideally under 120 words.\n\nQuestion: ${query}\n\nSources:\n${sourceText || 'No useful sources were found.'}`;
+}
+
+function classifyAiError(error) {
+  const status = Number(error?.status || error?.response?.status || 0);
+  const message = String(error?.message || error || 'Unknown AI error');
+  if (status === 429 || /quota|credit|limit|rate/i.test(message)) return { code: 'quota', message: 'Free AI quota is temporarily exhausted.' };
+  if (/model|not found|unsupported|invalid.*model/i.test(message)) return { code: 'model', message: 'The configured AI model is unavailable.' };
+  if (/OPENAI_BASE_URL|OPENAI_API_KEY|AI Gateway|gateway/i.test(message)) return { code: 'gateway', message: 'Netlify AI Gateway is not active for this deploy yet.' };
+  return { code: 'unknown', message: 'AI is temporarily unavailable.' };
 }
 
 export default async (req) => {
@@ -109,23 +119,37 @@ export default async (req) => {
 
   let answer = null;
   let aiUnavailable = false;
+  let aiError = null;
+  let aiModel = null;
+
   try {
+    if (!process.env.OPENAI_BASE_URL || !process.env.OPENAI_API_KEY) {
+      throw new Error('Netlify AI Gateway environment variables are missing');
+    }
+
     const openai = new OpenAI();
     const response = await openai.responses.create({
-      model: 'gpt-5.4-nano',
-      input: promptFor(query, results),
-      max_output_tokens: 220
+      model: 'gpt-5.6-sol',
+      input: [{ role: 'user', content: promptFor(query, results) }],
+      reasoning: { effort: 'minimal' },
+      max_output_tokens: 180
     });
+
     answer = String(response.output_text || '').trim() || null;
+    aiModel = response.model || 'gpt-5.6-sol';
+    if (!answer) throw new Error('AI returned an empty answer');
   } catch (e) {
     console.warn('Netlify AI Gateway unavailable', e);
     aiUnavailable = true;
+    aiError = classifyAiError(e);
   }
 
   return json({
     query,
     answer,
     aiUnavailable,
+    aiError,
+    aiModel,
     sources: results.map(({ _score, _i, ...r }) => r)
   });
 };
