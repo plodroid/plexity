@@ -1,0 +1,8 @@
+{
+  "name": "plexity",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "openai": "^5.12.2"
+  }
+}
