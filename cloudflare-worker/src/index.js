@@ -14,6 +14,7 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
 function cleanHtml(text = '') {
   return text
     .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
     .replace(/&#x27;|&#39;/g, "'")
@@ -34,42 +35,74 @@ function decodeDuckUrl(raw = '') {
   }
 }
 
-function parseDuckDuckGo(html) {
-  const blocks = html.split(/class="result\s/).slice(1);
+function addResult(results, title, rawUrl, snippet = '') {
+  const url = decodeDuckUrl(rawUrl);
+  const cleanTitle = cleanHtml(title);
+  if (!cleanTitle || !/^https?:\/\//i.test(url)) return;
+  results.push({ title: cleanTitle, url, snippet: cleanHtml(snippet) });
+}
+
+function parseDuckDuckGoHtml(html) {
   const results = [];
 
-  for (const block of blocks) {
-    const link = block.match(/class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
-    if (!link) continue;
-    const snippet = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/(?:a|div)>/i);
-    const url = decodeDuckUrl(link[1]);
-    if (!/^https?:\/\//i.test(url)) continue;
-    results.push({
-      title: cleanHtml(link[2]),
-      url,
-      snippet: cleanHtml(snippet?.[1] || '')
-    });
+  // DuckDuckGo HTML endpoint. Be tolerant of attribute ordering and quote style.
+  const links = [...html.matchAll(/<a\b[^>]*class=["'][^"']*result__a[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
+  for (const match of links) {
+    const after = html.slice(match.index + match[0].length, match.index + match[0].length + 3000);
+    const snippet = after.match(/class=["'][^"']*result__snippet[^"']*["'][^>]*>([\s\S]*?)<\/(?:a|div|td)>/i)?.[1] || '';
+    addResult(results, match[2], match[1], snippet);
     if (results.length >= 8) break;
   }
 
   return results;
 }
 
-async function searchDuckDuckGo(query) {
-  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+function parseDuckDuckGoLite(html) {
+  const results = [];
+  const links = [...html.matchAll(/<a\b[^>]*class=["'][^"']*result-link[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
+
+  for (const match of links) {
+    const after = html.slice(match.index + match[0].length, match.index + match[0].length + 2500);
+    const snippet = after.match(/class=["'][^"']*result-snippet[^"']*["'][^>]*>([\s\S]*?)<\/td>/i)?.[1] || '';
+    addResult(results, match[2], match[1], snippet);
+    if (results.length >= 8) break;
+  }
+
+  return results;
+}
+
+async function fetchDuck(url) {
   const res = await fetch(url, {
     headers: {
-      'user-agent': 'Mozilla/5.0 PlexitySearch/1.0',
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36 PlexitySearch/1.0',
+      'accept': 'text/html,application/xhtml+xml',
       'accept-language': 'en-US,en;q=0.9'
-    }
+    },
+    redirect: 'follow'
   });
   if (!res.ok) throw new Error(`DuckDuckGo returned ${res.status}`);
-  return parseDuckDuckGo(await res.text());
+  return res.text();
+}
+
+async function searchDuckDuckGo(query) {
+  const encoded = encodeURIComponent(query);
+
+  // Lite is simpler and less fragile for server-side parsing.
+  try {
+    const lite = await fetchDuck(`https://lite.duckduckgo.com/lite/?q=${encoded}`);
+    const parsed = parseDuckDuckGoLite(lite);
+    if (parsed.length) return parsed;
+  } catch (error) {
+    console.warn('DuckDuckGo Lite failed', error);
+  }
+
+  const html = await fetchDuck(`https://html.duckduckgo.com/html/?q=${encoded}`);
+  return parseDuckDuckGoHtml(html);
 }
 
 async function searchWikipedia(query) {
   const url = `https://en.wikipedia.org/w/rest.php/v1/search/page?q=${encodeURIComponent(query)}&limit=6`;
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: { 'api-user-agent': 'PlexitySearch/1.0' } });
   if (!res.ok) return [];
   const data = await res.json();
   return (data.pages || []).map((p) => ({
@@ -82,8 +115,15 @@ async function searchWikipedia(query) {
 function dedupe(items) {
   const seen = new Set();
   return items.filter((item) => {
-    if (!item?.url || seen.has(item.url)) return false;
-    seen.add(item.url);
+    if (!item?.url) return false;
+    let key = item.url;
+    try {
+      const u = new URL(item.url);
+      u.hash = '';
+      key = `${u.hostname}${u.pathname}${u.search}`.toLowerCase();
+    } catch {}
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }
@@ -96,11 +136,11 @@ function buildMessages(query, sources) {
   return [
     {
       role: 'system',
-      content: 'You are Plexity, an accurate web-search assistant. Answer the exact question directly. Use the supplied search results for factual/current claims, cite them with [1], [2], etc., and ignore irrelevant results. If the sources are insufficient, say so instead of inventing facts. Keep answers concise and useful.'
+      content: 'You are Plexity, an accurate web-search assistant. Answer the exact question directly using the supplied web results. Cite factual/current claims inline with [1], [2], etc. Never claim something is current, latest, best, cheapest, or available unless the supplied sources support it. Ignore irrelevant results. If sources conflict, say so. Keep answers concise and useful.'
     },
     {
       role: 'user',
-      content: `Question: ${query}\n\nSearch results:\n${context || 'No usable search results were returned.'}`
+      content: `Question: ${query}\n\nSearch results:\n${context}`
     }
   ];
 }
@@ -144,19 +184,15 @@ export default {
     const mode = body?.mode === 'search' ? 'search' : 'ai';
     if (!query) return json({ error: 'Missing query' }, 400);
 
-    let sources = [];
-    try {
-      const [ddg, wiki] = await Promise.allSettled([
-        searchDuckDuckGo(query),
-        searchWikipedia(query)
-      ]);
-      sources = dedupe([
-        ...(ddg.status === 'fulfilled' ? ddg.value : []),
-        ...(wiki.status === 'fulfilled' ? wiki.value : [])
-      ]).slice(0, 8);
-    } catch {
-      sources = [];
-    }
+    const [ddg, wiki] = await Promise.allSettled([
+      searchDuckDuckGo(query),
+      searchWikipedia(query)
+    ]);
+
+    const sources = dedupe([
+      ...(ddg.status === 'fulfilled' ? ddg.value : []),
+      ...(wiki.status === 'fulfilled' ? wiki.value : [])
+    ]).slice(0, 8);
 
     if (mode === 'search') {
       return json({
@@ -166,7 +202,23 @@ export default {
         model: null,
         aiUnavailable: false,
         aiLimited: false,
+        searchUnavailable: sources.length === 0,
         searchOnly: true
+      });
+    }
+
+    // Do not spend Workers AI quota on an unsourced answer and do not let the
+    // model hallucinate a supposedly current answer from old training data.
+    if (sources.length === 0) {
+      return json({
+        query,
+        answer: '',
+        sources: [],
+        model: MODEL,
+        aiUnavailable: false,
+        aiLimited: false,
+        searchUnavailable: true,
+        error: 'Live web search returned no usable sources, so Plexity skipped AI generation.'
       });
     }
 
@@ -174,7 +226,7 @@ export default {
       const result = await env.AI.run(MODEL, {
         messages: buildMessages(query, sources),
         max_tokens: 220,
-        temperature: 0.2,
+        temperature: 0.15,
         repetition_penalty: 1.1
       });
 
@@ -184,7 +236,8 @@ export default {
         sources,
         model: MODEL,
         aiUnavailable: false,
-        aiLimited: false
+        aiLimited: false,
+        searchUnavailable: false
       });
     } catch (err) {
       const failure = classifyAiError(err);
@@ -196,6 +249,7 @@ export default {
         model: MODEL,
         aiUnavailable: true,
         aiLimited: failure.limited,
+        searchUnavailable: false,
         error: failure.message
       }, failure.status);
     }
