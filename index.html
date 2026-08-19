@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="Plexity — public username discovery across the web." />
+  <title>Plexity — Username Search</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="noise"></div>
+
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Plexity home">
+      <span class="brand-mark">P</span>
+      <span>Plexity</span>
+    </a>
+    <span class="privacy-pill">Public profiles only</span>
+  </header>
+
+  <main>
+    <section class="hero" id="hero">
+      <div class="eyebrow">USERNAME DISCOVERY</div>
+      <h1>Find a username<br><span>across the web.</span></h1>
+      <p class="subtitle">A Sherlock-style public profile scanner. Enter one handle and Plexity checks common platforms for matching accounts.</p>
+
+      <form id="searchForm" class="search-shell">
+        <span class="at">@</span>
+        <input id="usernameInput" autocomplete="off" spellcheck="false" maxlength="64" placeholder="plodroid" aria-label="Username" />
+        <button type="submit">Search</button>
+      </form>
+
+      <div class="examples">
+        <span>Try</span>
+        <button type="button" data-example="plodroid">plodroid</button>
+        <button type="button" data-example="openai">openai</button>
+        <button type="button" data-example="github">github</button>
+      </div>
+    </section>
+
+    <section class="results-view hidden" id="resultsView">
+      <div class="results-head">
+        <div>
+          <button class="back" id="backBtn" type="button">← New search</button>
+          <h2 id="resultTitle">@username</h2>
+          <p id="summary">Scanning public profiles…</p>
+        </div>
+        <div class="stats">
+          <div><strong id="foundCount">0</strong><span>Found</span></div>
+          <div><strong id="checkedCount">0</strong><span>Checked</span></div>
+        </div>
+      </div>
+
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+        <span id="progressText">Starting scan…</span>
+      </div>
+
+      <div class="toolbar">
+        <div class="filters" role="group" aria-label="Result filters">
+          <button class="filter active" data-filter="all" type="button">All</button>
+          <button class="filter" data-filter="found" type="button">Found</button>
+          <button class="filter" data-filter="possible" type="button">Possible</button>
+        </div>
+        <label class="search-results">
+          <span>⌕</span>
+          <input id="filterInput" placeholder="Filter sites" />
+        </label>
+      </div>
+
+      <div class="result-grid" id="resultGrid"></div>
+      <div class="empty hidden" id="emptyState">No matching results in this view.</div>
+
+      <p class="disclaimer">Plexity checks only publicly reachable pages. A match means the profile URL appears to exist; it does not prove the account belongs to a specific person.</p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
