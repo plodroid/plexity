@@ -1,11 +1,11 @@
 const MODEL = '@cf/meta/llama-3.2-3b-instruct';
 
-const json = (data, status = 200, origin = '*') => new Response(JSON.stringify(data), {
+const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
   headers: {
     'content-type': 'application/json; charset=utf-8',
-    'access-control-allow-origin': origin,
-    'access-control-allow-methods': 'POST, OPTIONS',
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
     'access-control-allow-headers': 'content-type',
     'cache-control': 'no-store'
   }
@@ -105,21 +105,44 @@ function buildMessages(query, sources) {
   ];
 }
 
+function classifyAiError(err) {
+  const status = Number(err?.status || err?.response?.status || 0);
+  const text = String(err?.message || err || 'Workers AI failed');
+  const limited = status === 429 || /free allocation|quota|neuron|rate.?limit|limit exceeded|capacity/i.test(text);
+  return {
+    limited,
+    status: limited ? 429 : 503,
+    message: limited
+      ? 'Cloudflare Workers AI free quota is exhausted or temporarily rate-limited.'
+      : 'Cloudflare Workers AI is temporarily unavailable.'
+  };
+}
+
 export default {
   async fetch(request, env) {
-    const reqOrigin = request.headers.get('origin') || '';
-    const allowed = env.ALLOWED_ORIGIN || 'https://plodroid.github.io';
-    const origin = reqOrigin === allowed || /^http:\/\/localhost(?::\d+)?$/.test(reqOrigin) ? reqOrigin : allowed;
+    const url = new URL(request.url);
 
-    if (request.method === 'OPTIONS') return json({ ok: true }, 200, origin);
-    if (request.method !== 'POST') return json({ error: 'POST only' }, 405, origin);
+    if (request.method === 'OPTIONS') return json({ ok: true });
+
+    if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
+      return json({
+        ok: true,
+        service: 'plexity-api',
+        model: MODEL,
+        billingMode: 'free-plan-hard-stop'
+      });
+    }
+
+    if (url.pathname !== '/api/search') return json({ error: 'Not found' }, 404);
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
 
     let body;
     try { body = await request.json(); }
-    catch { return json({ error: 'Invalid JSON' }, 400, origin); }
+    catch { return json({ error: 'Invalid JSON' }, 400); }
 
     const query = String(body?.query || '').trim().slice(0, 300);
-    if (!query) return json({ error: 'Missing query' }, 400, origin);
+    const mode = body?.mode === 'search' ? 'search' : 'ai';
+    if (!query) return json({ error: 'Missing query' }, 400);
 
     let sources = [];
     try {
@@ -135,6 +158,18 @@ export default {
       sources = [];
     }
 
+    if (mode === 'search') {
+      return json({
+        query,
+        answer: '',
+        sources,
+        model: null,
+        aiUnavailable: false,
+        aiLimited: false,
+        searchOnly: true
+      });
+    }
+
     try {
       const result = await env.AI.run(MODEL, {
         messages: buildMessages(query, sources),
@@ -144,23 +179,25 @@ export default {
       });
 
       return json({
-        answer: result?.response || '',
+        query,
+        answer: String(result?.response || '').trim(),
         sources,
         model: MODEL,
+        aiUnavailable: false,
         aiLimited: false
-      }, 200, origin);
+      });
     } catch (err) {
-      const status = Number(err?.status || err?.response?.status || 0);
-      const text = String(err?.message || err || 'Workers AI failed');
-      const limited = status === 429 || /free allocation|neuron|limit|capacity/i.test(text);
+      const failure = classifyAiError(err);
 
       return json({
+        query,
         answer: '',
         sources,
         model: MODEL,
-        aiLimited: limited,
-        error: limited ? 'Daily free AI quota is exhausted or capacity is temporarily unavailable.' : 'AI generation is temporarily unavailable.'
-      }, limited ? 429 : 503, origin);
+        aiUnavailable: true,
+        aiLimited: failure.limited,
+        error: failure.message
+      }, failure.status);
     }
   }
 };

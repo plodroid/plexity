@@ -1,62 +1,85 @@
 # Plexity
 
-Plexity is a static, GitHub-Pages-friendly AI search interface. The language model runs directly in the visitor's browser through WebGPU, so there is no Ollama process, no always-on home PC, and no AI API key required.
+Plexity is a static AI search frontend backed by **Cloudflare Workers + Workers AI**. The website can stay on GitHub Pages or Netlify while the Worker handles live search and AI generation.
 
-## How it works
+## Architecture
 
-1. Plexity searches configured/public browser-accessible sources.
-2. Search-result snippets are shown as clickable sources.
-3. In **AI Answer** mode, WebLLM downloads a compatible local model into the visitor's browser cache and runs inference on their GPU.
-4. The model receives the query plus source snippets and generates a cited summary locally.
+1. The frontend sends the query and selected mode to `/api/search`.
+2. `plexity-api` searches DuckDuckGo HTML and Wikipedia from the Cloudflare Worker.
+3. In **AI Answer** mode, the Worker sends the search context to Cloudflare Workers AI using `@cf/meta/llama-3.2-3b-instruct`.
+4. In **Search** mode, Workers AI is skipped completely so search-only requests do not consume AI quota.
+5. If Workers AI is unavailable or the free allocation is exhausted, Plexity keeps the search results and shows a fallback message instead of attempting a paid provider.
 
-## AI models
+## Free-plan safety
 
-Default:
+This project is intended for the **Cloudflare Workers Free plan only**.
 
-- `Llama-3.2-1B-Instruct-q4f16_1-MLC` — roughly 879 MB of required VRAM according to WebLLM's prebuilt configuration.
+- Do not upgrade the Cloudflare account to Workers Paid for this project.
+- Do not add a paid AI provider or API key as a fallback.
+- `cloudflare-worker/wrangler.jsonc` caps each Worker invocation at 10 ms CPU and 5 subrequests.
+- Workers AI quota/rate-limit errors are returned to the frontend as `aiUnavailable` / `aiLimited`, and Plexity falls back to search results.
+- The Worker contains no payment credentials and no OpenAI dependency.
 
-Optional:
+Cloudflare's Free-plan quotas are platform limits. When a free allocation is exhausted, operations fail until the quota resets rather than continuing as billable paid usage. Keep the Cloudflare account itself on Workers Free to preserve that behavior.
 
-- `Llama-3.2-3B-Instruct-q4f16_1-MLC` — better responses but requires substantially more GPU memory.
+## Deploy the Cloudflare Worker
 
-The first AI query downloads the selected model. Future loads can reuse the browser cache.
+From `cloudflare-worker/`:
 
-## Search providers
+```bash
+npm install
+npx wrangler login
+npm run deploy
+```
 
-Because GitHub Pages is static hosting, Plexity cannot securely run a server-side search proxy. The browser currently tries:
+Wrangler will print a URL similar to:
 
-- an optional user-configured **SearXNG JSON endpoint** (best option for broad web results), then
-- DuckDuckGo's browser-accessible Instant Answer API, and
-- Wikipedia search as a fallback.
+```text
+https://plexity-api.<your-workers-subdomain>.workers.dev
+```
 
-Public SearXNG instances can change CORS/rate-limit policies, so Plexity does not hard-code one as a guaranteed dependency. Open Settings in the site to provide an endpoint that supports `format=json` and browser CORS.
+Test it with:
 
-## Deploy on GitHub Pages
+```text
+GET https://plexity-api.<your-workers-subdomain>.workers.dev/health
+```
 
-A Pages workflow is included at `.github/workflows/pages.yml`.
+The health response should report `service: "plexity-api"` and `billingMode: "free-plan-hard-stop"`.
 
-After merging to `main`:
+## Connect the frontend
 
-1. Open **Repository Settings → Pages**.
-2. Under **Build and deployment**, choose **GitHub Actions** if it is not already selected.
-3. The included workflow deploys the static site on pushes to `main`.
+### Netlify
 
-For this repository the expected project-site URL is:
+The included Netlify Function is now only a tiny proxy; it does **not** run OpenAI or another AI provider.
 
-`https://plodroid.github.io/plexity/`
+Set this Netlify environment variable to the Worker base URL:
 
-## Browser requirements
+```text
+PLEXITY_WORKER_URL=https://plexity-api.<your-workers-subdomain>.workers.dev
+```
 
-AI mode needs a WebGPU-capable browser/device. Search mode still works without WebGPU.
+The existing `/api/search` redirect will then forward requests to Cloudflare.
 
-## Privacy
+### GitHub Pages
 
-AI inference happens in the browser. The query still has to be sent to whichever search provider is used, because live web search cannot happen without contacting a search service.
+GitHub Pages cannot provide a server-side `/api/search` route. Before loading `app.js`, set:
+
+```html
+<script>
+  window.PLEXITY_API_URL = 'https://plexity-api.<your-workers-subdomain>.workers.dev/api/search';
+</script>
+```
+
+If `PLEXITY_API_URL` is not set, Plexity uses `/api/search`, which is suitable for the Netlify deployment.
+
+## Search fallback
+
+If the Cloudflare backend itself is unreachable, the browser still attempts a Wikipedia search so the UI does not become completely useless.
 
 ## Tech
 
-- HTML/CSS/vanilla JavaScript
-- WebLLM (`@mlc-ai/web-llm`) loaded as an ES module
-- WebGPU
-- GitHub Pages
-- SearXNG-compatible JSON search
+- HTML / CSS / vanilla JavaScript
+- Cloudflare Workers
+- Cloudflare Workers AI
+- DuckDuckGo HTML search + Wikipedia fallback
+- Netlify or GitHub Pages frontend hosting
