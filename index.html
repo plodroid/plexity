@@ -1,31 +1,43 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="description" content="Plexity — public username discovery across the web." />
+  <meta name="description" content="Plexity — Sherlock-style public username discovery across the web." />
+  <meta name="color-scheme" content="dark light" />
   <title>Plexity — Username Search</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="noise"></div>
+  <div class="grain-overlay" aria-hidden="true"></div>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
 
   <header class="topbar">
     <a class="brand" href="./" aria-label="Plexity home">
       <span class="brand-mark">P</span>
       <span>Plexity</span>
     </a>
-    <span class="privacy-pill">Public profiles only</span>
+
+    <div class="top-actions">
+      <span class="privacy-pill"><span class="accent-dot"></span>Public profiles only</span>
+      <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle theme" title="Toggle theme">
+        <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>
+      </button>
+    </div>
   </header>
 
   <main>
     <section class="hero" id="hero">
-      <div class="eyebrow">USERNAME DISCOVERY</div>
-      <h1>Find a username<br><span>across the web.</span></h1>
-      <p class="subtitle">A Sherlock-style public profile scanner. Enter one handle and Plexity checks common platforms for matching accounts.</p>
+      <div class="hero-copy">
+        <div class="eyebrow">USERNAME DISCOVERY</div>
+        <h1>Find a username<br><em>across the web.</em></h1>
+        <p class="subtitle">A Sherlock-style public profile finder that runs entirely in your browser. Plexity checks public APIs where possible and builds exact profile candidates everywhere else.</p>
+      </div>
 
       <form id="searchForm" class="search-shell">
         <span class="at">@</span>
@@ -39,34 +51,44 @@
         <button type="button" data-example="openai">openai</button>
         <button type="button" data-example="github">github</button>
       </div>
+
+      <div class="hero-note">
+        <span class="note-line"></span>
+        <span>No backend · no Cloudflare · no API key</span>
+        <span class="note-line"></span>
+      </div>
     </section>
 
     <section class="results-view hidden" id="resultsView">
       <div class="results-head">
-        <div>
+        <div class="results-title-wrap">
           <button class="back" id="backBtn" type="button">← New search</button>
+          <div class="section-label">SEARCH RESULTS</div>
           <h2 id="resultTitle">@username</h2>
-          <p id="summary">Scanning public profiles…</p>
+          <p id="summary">Checking public sources…</p>
         </div>
+
         <div class="stats">
-          <div><strong id="foundCount">0</strong><span>Found</span></div>
-          <div><strong id="checkedCount">0</strong><span>Checked</span></div>
+          <div class="stat-card verified-stat"><strong id="verifiedCount">0</strong><span>Verified</span></div>
+          <div class="stat-card"><strong id="candidateCount">0</strong><span>Candidates</span></div>
+          <div class="stat-card"><strong id="checkedCount">0</strong><span>Sources</span></div>
         </div>
       </div>
 
       <div class="progress-wrap" id="progressWrap">
         <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
-        <span id="progressText">Starting scan…</span>
+        <span id="progressText">Preparing search…</span>
       </div>
 
       <div class="toolbar">
         <div class="filters" role="group" aria-label="Result filters">
           <button class="filter active" data-filter="all" type="button">All</button>
-          <button class="filter" data-filter="found" type="button">Found</button>
-          <button class="filter" data-filter="possible" type="button">Possible</button>
+          <button class="filter" data-filter="verified" type="button">Verified</button>
+          <button class="filter" data-filter="candidate" type="button">Candidates</button>
         </div>
+
         <label class="search-results">
-          <span>⌕</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.4-3.4"/></svg>
           <input id="filterInput" placeholder="Filter sites" />
         </label>
       </div>
@@ -74,7 +96,15 @@
       <div class="result-grid" id="resultGrid"></div>
       <div class="empty hidden" id="emptyState">No matching results in this view.</div>
 
-      <p class="disclaimer">Plexity checks only publicly reachable pages. A match means the profile URL appears to exist; it does not prove the account belongs to a specific person.</p>
+      <aside class="info-card">
+        <div class="info-icon">i</div>
+        <div>
+          <strong>What “verified” means</strong>
+          <p>Plexity only marks a result verified when a public API confirms that username. Other platforms are shown as exact profile candidates because browsers cannot reliably inspect arbitrary sites across origins.</p>
+        </div>
+      </aside>
+
+      <p class="disclaimer">A username match does not prove multiple accounts belong to the same person. Plexity only uses public URLs and public API responses.</p>
     </section>
   </main>
 
