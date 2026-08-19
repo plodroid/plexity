@@ -1,13 +1,9 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "plexity-api",
+  "name": "plexity",
   "main": "src/index.js",
   "compatibility_date": "2026-08-18",
   "ai": {
     "binding": "AI"
-  },
-  "limits": {
-    "cpu_ms": 10,
-    "subrequests": 5
   }
 }
