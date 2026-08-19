@@ -1,27 +1,25 @@
 # Plexity
 
-A Sherlock-style public username discovery search engine that runs entirely in the browser.
+Plexity is a Sherlock-style public username discovery search engine with a warm Apple-inspired interface.
 
-Type a username once and Plexity prepares public profile candidates across dozens of sites. Where a public browser-accessible API exists, Plexity also verifies the username live.
+## How it works
 
-## Architecture
+- The frontend lives in `public/`.
+- A Netlify Function at `/api/search` performs the cross-site checks server-side.
+- The scanner loads the Sherlock Project's public site definitions and uses their URL patterns and detection rules.
+- NSFW entries are excluded.
+- No Cloudflare Worker, paid API key, login bypass, or private-data access is used.
 
-- `index.html`, `styles.css`, `app.js` — the whole app
-- GitHub Pages workflow — deploys the static site
-- No Cloudflare Worker
-- No backend
-- No API keys
-- No paid services
+## Result states
 
-## Result confidence
+- **Found** — the site's configured Sherlock detection rule indicates the public username/profile exists.
+- **Unclear** — the site blocked the request, timed out, rate-limited, or could not be confidently classified.
+- **Not found** — the configured missing-account signal was detected.
 
-- **Verified** — a public API confirmed that the username exists on that service.
-- **Candidate** — Plexity generated the exact public profile URL or username-search URL for that platform, but the browser cannot safely/reliably verify it because of cross-origin restrictions or because the platform has no suitable public API.
+A matching username across multiple sites does not prove those accounts belong to the same person.
 
-Plexity intentionally does not label an unverified profile as found.
+## Deploy
 
-## Privacy
+Connect this repository to Netlify. `netlify.toml` publishes the `public` directory and deploys `netlify/functions/search.mjs` automatically.
 
-Plexity only uses public URLs and public API responses. It does not log in to services, bypass access controls, or access private account information.
-
-A username match does not prove that accounts on different services belong to the same person.
+The site needs Netlify Functions for full Sherlock-style checking; a plain GitHub Pages deployment cannot reliably scan arbitrary websites because browsers enforce cross-origin restrictions.
