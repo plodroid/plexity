@@ -97,7 +97,7 @@ function directAnswer(query) {
 
 function apiEndpoint() {
   const configured = String(window.PLEXITY_API_URL || '').trim();
-  return configured || '/api/search';
+  return configured || 'https://plexity.housikiki.workers.dev/api/search';
 }
 
 async function callBackend(query) {
@@ -184,10 +184,10 @@ async function runSearch(query) {
     renderSources(sources);
     if (mode === 'ai' && !instant) {
       els.answerCard.classList.remove('hidden');
-      els.answerText.textContent = 'The Cloudflare backend is not connected on this deployment yet. Wikipedia fallback still works.';
-      els.answerMeta.textContent = 'Deploy the Worker and point PLEXITY_API_URL at /api/search.';
+      els.answerText.textContent = 'The Cloudflare backend is temporarily unreachable. Wikipedia fallback still works.';
+      els.answerMeta.textContent = 'Plexity will automatically use the Cloudflare Worker again when it is reachable.';
     } else if (instant) {
-      els.answerMeta.textContent = 'Instant answer · Cloudflare backend is not connected on this deployment yet.';
+      els.answerMeta.textContent = 'Instant answer · Cloudflare backend is temporarily unreachable.';
     }
   } finally {
     if (searchId === activeSearch) clearStatus();
