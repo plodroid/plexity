@@ -1,6 +1,9 @@
 const SEARCH_TIMEOUT = 4200;
-const VERIFY_TIMEOUT = 2200;
-const MAX_RESULTS = 50;
+const PAGE_TIMEOUT = 3000;
+const MAX_SEARCH_RESULTS = 70;
+const MAX_FIRST_HOP = 28;
+const MAX_SECOND_HOP = 18;
+const MAX_BODY_BYTES = 700_000;
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -14,6 +17,7 @@ function cleanHtml(text = '') {
   return String(text)
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
@@ -25,9 +29,9 @@ function cleanHtml(text = '') {
     .trim();
 }
 
-function normalizeUrl(url = '') {
+function normalizeUrl(url = '', base) {
   try {
-    const u = new URL(url);
+    const u = new URL(url, base);
     u.hash = '';
     for (const key of [...u.searchParams.keys()]) {
       if (/^(utm_|ref$|ref_|source$|campaign$|fbclid$|gclid$)/i.test(key)) u.searchParams.delete(key);
@@ -70,8 +74,32 @@ async function fetchWithTimeout(url, options = {}, ms = SEARCH_TIMEOUT) {
 const browserHeaders = {
   'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36',
   'accept-language': 'en-US,en;q=0.9',
-  'accept': 'text/html,application/xhtml+xml'
+  'accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.6'
 };
+
+async function readLimited(res, maxBytes = MAX_BODY_BYTES) {
+  const length = Number(res.headers.get('content-length') || 0);
+  if (length && length > maxBytes * 2) return '';
+  if (!res.body?.getReader) return (await res.text()).slice(0, maxBytes);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = '';
+  try {
+    while (total < maxBytes) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      text += decoder.decode(value, { stream: true });
+      if (total >= maxBytes) break;
+    }
+    text += decoder.decode();
+  } finally {
+    try { await reader.cancel(); } catch {}
+  }
+  return text.slice(0, maxBytes);
+}
 
 function decodeDuckUrl(raw = '') {
   try {
@@ -152,42 +180,31 @@ async function searchYahoo(query) {
   } catch { return []; }
 }
 
-function scoreResult(result, username) {
+function baseSearchScore(result, username) {
   const needle = username.toLowerCase();
   const title = String(result.title || '').toLowerCase();
   const snippet = String(result.snippet || '').toLowerCase();
   const url = String(result.url || '').toLowerCase();
   let score = 0;
-
-  if (url.includes(`@${needle}`)) score += 9;
-  if (url.includes(`/${needle}`)) score += 8;
-  if (url.includes(`=${needle}`)) score += 5;
-  if (title.includes(`@${needle}`)) score += 6;
-  if (title.includes(needle)) score += 4;
-  if (snippet.includes(`@${needle}`)) score += 4;
-  if (snippet.includes(needle)) score += 2;
-
-  try {
-    const u = new URL(result.url);
-    const parts = u.pathname.split('/').filter(Boolean).map(p => decodeURIComponent(p).toLowerCase());
-    if (parts.some(p => p === needle || p === `@${needle}`)) score += 7;
-    if (u.hostname.split('.')[0].toLowerCase() === needle) score += 5;
-  } catch {}
-
+  if (url.includes(needle)) score += 4;
+  if (url.includes(`@${needle}`)) score += 4;
+  if (title.includes(needle)) score += 2;
+  if (snippet.includes(needle)) score += 1;
   return score;
 }
 
-function dedupe(items, username) {
+function dedupeSearch(items, username) {
   const map = new Map();
   for (const item of items) {
     if (!item?.url || !isUsefulUrl(item.url)) continue;
-    const score = scoreResult(item, username);
-    if (score < 2) continue;
     const key = normalizeUrl(item.url).toLowerCase();
+    const score = baseSearchScore(item, username);
     const prev = map.get(key);
-    if (!prev || score > prev.score) map.set(key, { ...item, score });
+    if (!prev || score > prev.searchScore) map.set(key, { ...item, searchScore: score });
   }
-  return [...map.values()].sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS);
+  return [...map.values()]
+    .sort((a, b) => b.searchScore - a.searchScore)
+    .slice(0, MAX_SEARCH_RESULTS);
 }
 
 async function searchWeb(username) {
@@ -195,70 +212,162 @@ async function searchWeb(username) {
     `"${username}"`,
     `"@${username}"`,
     `${username} profile`,
+    `${username} account`,
+    `${username} username`,
     `inurl:${username} ${username}`
   ];
-
   const jobs = [];
-  for (const q of queries) {
-    jobs.push(searchDuck(q), searchBing(q), searchYahoo(q));
-  }
-
+  for (const q of queries) jobs.push(searchDuck(q), searchBing(q), searchYahoo(q));
   const settled = await Promise.allSettled(jobs);
-  const combined = settled.flatMap(r => r.status === 'fulfilled' ? r.value : []);
-  return dedupe(combined, username);
+  return dedupeSearch(settled.flatMap(r => r.status === 'fulfilled' ? r.value : []), username);
 }
 
-function looksLikeDirectProfile(url, username) {
-  try {
-    const u = new URL(url);
-    const needle = username.toLowerCase();
-    const parts = u.pathname.split('/').filter(Boolean).map(p => decodeURIComponent(p).toLowerCase());
-    return parts.some(p => p === needle || p === `@${needle}`) || u.pathname.toLowerCase().includes(`/@${needle}`);
-  } catch { return false; }
+function countNeedle(text, username) {
+  const hay = String(text || '').toLowerCase();
+  const needle = username.toLowerCase();
+  if (!needle) return 0;
+  let count = 0;
+  let pos = 0;
+  while ((pos = hay.indexOf(needle, pos)) !== -1 && count < 100) {
+    count++;
+    pos += needle.length;
+  }
+  return count;
 }
 
-async function verifyOne(result, username) {
-  if (!looksLikeDirectProfile(result.url, username)) return { ...result, status: 'unknown' };
-
-  try {
-    const res = await fetchWithTimeout(result.url, {
-      headers: browserHeaders,
-      method: 'GET'
-    }, VERIFY_TIMEOUT);
-
-    if (res.status === 404 || res.status === 410) return { ...result, status: 'unknown' };
-    if (res.status >= 200 && res.status < 400) return { ...result, status: 'found', statusCode: res.status };
-  } catch {}
-
-  // A search engine surfaced the URL but the target blocked our verification request.
-  return { ...result, status: result.score >= 9 ? 'found' : 'unknown' };
+function contextAround(text, username, radius = 120) {
+  const source = cleanHtml(text);
+  const lower = source.toLowerCase();
+  const i = lower.indexOf(username.toLowerCase());
+  if (i < 0) return '';
+  const start = Math.max(0, i - radius);
+  const end = Math.min(source.length, i + username.length + radius);
+  return `${start ? '…' : ''}${source.slice(start, end).trim()}${end < source.length ? '…' : ''}`;
 }
 
-async function verifyTop(results, username) {
-  const out = [...results];
-  const indexes = results
-    .map((r, i) => ({ r, i }))
-    .filter(({ r }) => looksLikeDirectProfile(r.url, username))
-    .slice(0, 10);
+function extractMeta(html, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const a = html.match(new RegExp(`<meta[^>]+(?:name|property)=["']${escaped}["'][^>]+content=["']([^"']*)["']`, 'i'));
+  const b = html.match(new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:name|property)=["']${escaped}["']`, 'i'));
+  return cleanHtml(a?.[1] || b?.[1] || '');
+}
 
-  await Promise.all(indexes.map(async ({ r, i }) => {
-    out[i] = await verifyOne(r, username);
-  }));
-
+function extractLinks(html, baseUrl, username) {
+  const out = [];
+  const needle = username.toLowerCase();
+  for (const m of html.matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    const url = normalizeUrl(m[1], baseUrl);
+    if (!isUsefulUrl(url)) continue;
+    const label = cleanHtml(m[2]);
+    const hay = `${url} ${label}`.toLowerCase();
+    if (!hay.includes(needle)) continue;
+    out.push({ url, title: label || hostOf(url), snippet: '', engine: 'Page link' });
+    if (out.length >= 30) break;
+  }
   return out;
 }
 
-function toUiResult(result, username) {
-  const score = result.score ?? scoreResult(result, username);
+function evidenceScore({ finalUrl, rawHtml, text, title, description, canonical, ogUrl }, username) {
+  const needle = username.toLowerCase();
+  let score = 0;
+  const locations = [];
+
+  const add = (name, value, points) => {
+    if (String(value || '').toLowerCase().includes(needle)) {
+      score += points;
+      locations.push(name);
+    }
+  };
+
+  add('url', finalUrl, 8);
+  add('canonical', canonical, 7);
+  add('og:url', ogUrl, 6);
+  add('title', title, 5);
+  add('description', description, 3);
+
+  const textHits = countNeedle(text, username);
+  const htmlHits = countNeedle(rawHtml, username);
+  if (textHits) {
+    score += Math.min(10, 3 + textHits);
+    locations.push('page text');
+  }
+  if (!textHits && htmlHits) {
+    score += Math.min(6, 2 + htmlHits);
+    locations.push('page source');
+  }
+
+  return { score, locations: [...new Set(locations)], hits: Math.max(textHits, htmlHits) };
+}
+
+async function inspectPage(result, username) {
+  try {
+    const res = await fetchWithTimeout(result.url, { headers: browserHeaders }, PAGE_TIMEOUT);
+    const type = (res.headers.get('content-type') || '').toLowerCase();
+    if (!(type.includes('text/html') || type.includes('text/plain') || type.includes('application/xhtml'))) {
+      return { ...result, status: 'unknown', deepScore: result.searchScore || 0, linked: [] };
+    }
+
+    const html = await readLimited(res);
+    if (!html) return { ...result, status: 'unknown', deepScore: result.searchScore || 0, linked: [] };
+
+    const finalUrl = normalizeUrl(res.url || result.url);
+    const title = cleanHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || result.title || '');
+    const description = extractMeta(html, 'description') || extractMeta(html, 'og:description') || result.snippet || '';
+    const canonical = normalizeUrl(html.match(/<link[^>]+rel=["'][^"']*canonical[^"']*["'][^>]+href=["']([^"']+)["']/i)?.[1] || '', finalUrl);
+    const ogUrl = normalizeUrl(extractMeta(html, 'og:url') || '', finalUrl);
+    const text = cleanHtml(html);
+    const evidence = evidenceScore({ finalUrl, rawHtml: html, text, title, description, canonical, ogUrl }, username);
+    const linked = extractLinks(html, finalUrl, username);
+    const snippet = contextAround(text, username) || description || result.snippet || '';
+
+    return {
+      ...result,
+      url: finalUrl || result.url,
+      title: title || result.title || hostOf(finalUrl),
+      snippet,
+      statusCode: res.status,
+      status: res.ok && evidence.score >= 5 ? 'found' : 'unknown',
+      deepScore: evidence.score + (result.searchScore || 0),
+      evidence: evidence.locations,
+      hits: evidence.hits,
+      linked
+    };
+  } catch {
+    return { ...result, status: 'unknown', deepScore: result.searchScore || 0, linked: [] };
+  }
+}
+
+async function inspectBatch(items, username, limit) {
+  const chosen = items.slice(0, limit);
+  const settled = await Promise.allSettled(chosen.map(item => inspectPage(item, username)));
+  return settled.map((r, i) => r.status === 'fulfilled' ? r.value : { ...chosen[i], status: 'unknown', deepScore: chosen[i].searchScore || 0, linked: [] });
+}
+
+function mergeResults(items, username) {
+  const map = new Map();
+  for (const item of items) {
+    if (!item?.url || !isUsefulUrl(item.url)) continue;
+    const key = normalizeUrl(item.url).toLowerCase();
+    const prev = map.get(key);
+    const score = item.deepScore ?? item.searchScore ?? baseSearchScore(item, username);
+    const normalized = { ...item, deepScore: score };
+    if (!prev || normalized.status === 'found' && prev.status !== 'found' || score > (prev.deepScore || 0)) map.set(key, normalized);
+  }
+  return [...map.values()];
+}
+
+function toUiResult(result) {
   return {
     site: result.title || hostOf(result.url) || 'Web result',
     title: result.title || '',
     url: result.url,
     snippet: result.snippet || '',
     engine: result.engine || 'Web',
-    status: result.status || (score >= 9 ? 'found' : 'unknown'),
+    status: result.status || 'unknown',
     statusCode: result.statusCode || null,
-    score
+    score: result.deepScore || result.searchScore || 0,
+    evidence: result.evidence || [],
+    hits: result.hits || 0
   };
 }
 
@@ -274,16 +383,33 @@ export default async (req) => {
 
   try {
     const discovered = await searchWeb(username);
-    const verified = await verifyTop(discovered, username);
-    const results = verified.map(r => toUiResult(r, username));
+    const firstHop = await inspectBatch(discovered, username, MAX_FIRST_HOP);
+
+    const linkedCandidates = dedupeSearch(
+      firstHop.flatMap(r => r.linked || []),
+      username
+    ).filter(link => !firstHop.some(r => normalizeUrl(r.url).toLowerCase() === normalizeUrl(link.url).toLowerCase()));
+
+    const secondHop = await inspectBatch(linkedCandidates, username, MAX_SECOND_HOP);
+    const merged = mergeResults([...firstHop, ...secondHop], username);
+
+    // Keep actual deep matches first. Search-only/blocked pages remain Unclear instead of being faked as Found.
+    const results = merged
+      .filter(r => r.status === 'found' || (r.searchScore || 0) >= 4)
+      .sort((a, b) => {
+        if (a.status !== b.status) return a.status === 'found' ? -1 : 1;
+        return (b.deepScore || 0) - (a.deepScore || 0);
+      })
+      .slice(0, 60)
+      .map(toUiResult);
 
     return json({
       username,
-      checked: results.length,
+      checked: firstHop.length + secondHop.length,
       found: results.filter(r => r.status === 'found').length,
       unknown: results.filter(r => r.status === 'unknown').length,
       results,
-      source: 'public web search indexes'
+      source: 'web search + full-page deep scan + one-hop matching links'
     });
   } catch (error) {
     console.error(error);
