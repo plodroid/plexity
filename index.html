@@ -15,7 +15,7 @@
     </a>
     <nav>
       <a href="#framework">Framework</a>
-      <a href="#examples">Examples</a>
+      <a href="#examples">Examples</a>\n      <a href="#real-aapl">Real AAPL</a>
       <a href="#cheatsheet">Cheat sheet</a>
     </nav>
   </header>
@@ -208,6 +208,106 @@
           </div>
           <ul class="checks"><li>Break holds below the low</li><li>CVD confirms downward</li><li>Footprint has sell imbalances</li><li>Retest fails below breakout</li></ul>
         </article>
+      </div>
+    </section>
+
+    <section class="section" id="real-aapl">
+      <div class="section-head">
+        <span class="eyebrow">REAL AAPL NY SESSIONS</span>
+        <h2>Four real Apple examples</h2>
+        <p>These are reconstructed from real NASDAQ:AAPL regular-session OHLC and volume. The right-side SVP shapes are teaching reconstructions of how acceptance/rejection would appear; exact price-bin SVP can vary by data feed and requires intraday/tick volume-at-price data.</p>
+      </div>
+
+      <div class="real-grid">
+        <article class="real-example danger">
+          <div class="real-top"><div><span class="case-type">SHORT REVERSAL · AUG 20, 2026</span><h3>Previous high swept, then violently rejected</h3></div><span class="real-badge">High sweep</span></div>
+          <div class="real-chart">
+            <div class="real-price-area">
+              <div class="prior-line prior-high" style="--level:25%"><span>Aug 19 high · $319.28</span></div>
+              <div class="ohlc-path bearish">
+                <span class="wick" style="--top:12%;--bottom:80%"></span>
+                <span class="body" style="--top:28%;--bottom:75%"></span>
+              </div>
+              <span class="sweep-note top">high $320.28 → rejection</span>
+            </div>
+            <div class="svp-proxy down-profile">
+              <span class="svp-title">SVP</span>
+              <i style="--w:38%"></i><i style="--w:52%"></i><i style="--w:72%"></i><i class="poc" style="--w:94%"></i><i style="--w:82%"></i><i style="--w:58%"></i><i style="--w:34%"></i>
+              <b class="vp-label vah">VAH</b><b class="vp-label pocl">POC area</b><b class="vp-label val">VAL</b>
+            </div>
+          </div>
+          <div class="session-stats"><span>O <b>$317.45</b></span><span>H <b>$320.28</b></span><span>L <b>$310.65</b></span><span>C <b>$311.30</b></span><span>Vol <b>40.96M</b></span></div>
+          <p class="real-read"><strong>Why it fits:</strong> Aug 20 traded $1.00 above Aug 19's high, but finished $7.98 below that prior high. That is the exact behavior we mean by <em>take buy-side liquidity → fail to accept → rotate lower</em>. On an SVP, you would watch for poor volume acceptance at the extreme and value building back lower.</p>
+        </article>
+
+        <article class="real-example success">
+          <div class="real-top"><div><span class="case-type">LONG REVERSAL · SEP 9, 2026</span><h3>Previous low swept, then reclaimed</h3></div><span class="real-badge">Low sweep</span></div>
+          <div class="real-chart">
+            <div class="real-price-area">
+              <div class="prior-line prior-low" style="--level:45%"><span>Sep 8 low · $314.90</span></div>
+              <div class="ohlc-path reclaim">
+                <span class="wick" style="--top:20%;--bottom:92%"></span>
+                <span class="body" style="--top:43%;--bottom:46%"></span>
+              </div>
+              <span class="sweep-note bottom">low $309.90 → reclaim</span>
+            </div>
+            <div class="svp-proxy reclaim-profile">
+              <span class="svp-title">SVP</span>
+              <i style="--w:30%"></i><i style="--w:45%"></i><i style="--w:70%"></i><i class="poc" style="--w:100%"></i><i style="--w:83%"></i><i style="--w:52%"></i><i style="--w:26%"></i>
+              <b class="vp-label vah">VAH</b><b class="vp-label pocl">RTH VWAP $314.24</b><b class="vp-label val">VAL</b>
+            </div>
+          </div>
+          <div class="session-stats"><span>O <b>$315.49</b></span><span>H <b>$319.15</b></span><span>L <b>$309.90</b></span><span>C <b>$315.34</b></span><span>Vol <b>64.68M</b></span></div>
+          <p class="real-read"><strong>Why it fits:</strong> AAPL ran $5.00 below Sep 8's low, yet closed back above it. MarketChameleon reports regular-hours VWAP near $314.24 and exceptionally heavy midday notional volume, so the market did meaningful business back inside the reclaimed area. That is the kind of acceptance you want after a sell-side sweep.</p>
+        </article>
+
+        <article class="real-example success">
+          <div class="real-top"><div><span class="case-type">LONG CONTINUATION · SEP 10, 2026</span><h3>Previous high broke and value expanded upward</h3></div><span class="real-badge">Upside acceptance</span></div>
+          <div class="real-chart">
+            <div class="real-price-area">
+              <div class="prior-line prior-high" style="--level:68%"><span>Sep 9 high · $319.15</span></div>
+              <div class="ohlc-path bullish">
+                <span class="wick" style="--top:8%;--bottom:83%"></span>
+                <span class="body" style="--top:10%;--bottom:81%"></span>
+              </div>
+              <span class="sweep-note top">close $326.57 near session high</span>
+            </div>
+            <div class="svp-proxy up-profile">
+              <span class="svp-title">SVP</span>
+              <i style="--w:35%"></i><i style="--w:64%"></i><i class="poc" style="--w:100%"></i><i style="--w:91%"></i><i style="--w:74%"></i><i style="--w:43%"></i><i style="--w:24%"></i>
+              <b class="vp-label vah">VAH ↑</b><b class="vp-label pocl">value migrates ↑</b><b class="vp-label val">VAL ↑</b>
+            </div>
+          </div>
+          <div class="session-stats"><span>O <b>$316.67</b></span><span>H <b>$326.74</b></span><span>L <b>$316.51</b></span><span>C <b>$326.57</b></span><span>Vol <b>69.37M</b></span></div>
+          <p class="real-read"><strong>Why it fits:</strong> Sep 10 broke Sep 9's $319.15 high and closed $7.42 above it—just $0.17 under the day's high—with about 69.4M shares traded. Instead of poking the level and falling back, price stayed above it. That is <em>break → acceptance → continuation</em>.</p>
+        </article>
+
+        <article class="real-example danger">
+          <div class="real-top"><div><span class="case-type">SHORT CONTINUATION · SEP 4, 2026</span><h3>Previous low broke and price accepted below</h3></div><span class="real-badge">Downside acceptance</span></div>
+          <div class="real-chart">
+            <div class="real-price-area">
+              <div class="prior-line prior-low" style="--level:42%"><span>Sep 3 low · $324.11</span></div>
+              <div class="ohlc-path bearish">
+                <span class="wick" style="--top:9%;--bottom:91%"></span>
+                <span class="body" style="--top:14%;--bottom:75%"></span>
+              </div>
+              <span class="sweep-note bottom">close $319.97 below prior low</span>
+            </div>
+            <div class="svp-proxy down-profile">
+              <span class="svp-title">SVP</span>
+              <i style="--w:28%"></i><i style="--w:45%"></i><i style="--w:69%"></i><i style="--w:88%"></i><i class="poc" style="--w:100%"></i><i style="--w:77%"></i><i style="--w:46%"></i>
+              <b class="vp-label vah">VAH ↓</b><b class="vp-label pocl">value migrates ↓</b><b class="vp-label val">VAL ↓</b>
+            </div>
+          </div>
+          <div class="session-stats"><span>O <b>$328.31</b></span><span>H <b>$328.93</b></span><span>L <b>$317.86</b></span><span>C <b>$319.97</b></span><span>Vol <b>39.61M</b></span></div>
+          <p class="real-read"><strong>Why it fits:</strong> Sep 4 broke Sep 3's $324.11 low by $6.25 and still closed $4.14 below that prior low. The market did not reclaim the broken level. That is the continuation version: lower prices were accepted rather than rejected.</p>
+        </article>
+      </div>
+
+      <div class="source-note">
+        <strong>Real-data sources:</strong> NASDAQ:AAPL regular-session OHLC/volume from StockAnalysis / FinanceCharts. Sep 9 intraday session VWAP/notional breakdown from MarketChameleon. SVP shapes above are explanatory reconstructions, not copied tick profiles; exact POC/VAH/VAL depends on the volume-at-price feed and profile settings.
+        <a href="https://stockanalysis.com/stocks/aapl/history/" target="_blank" rel="noopener">AAPL history ↗</a>
+        <a href="https://marketchameleon.com/Overview/AAPL/Stock-Price-Action/" target="_blank" rel="noopener">Session volume/VWAP ↗</a>
       </div>
     </section>
 
