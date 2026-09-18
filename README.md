@@ -1,6 +1,6 @@
 # Plexity Order Flow
 
-A static visual guide explaining how to distinguish a liquidity sweep from continuation using:
+A static GitHub Pages visual guide explaining liquidity sweeps vs continuation with:
 
 - Session Volume Profile (SVP)
 - Cumulative Volume Delta (CVD)
@@ -8,6 +8,6 @@ A static visual guide explaining how to distinguish a liquidity sweep from conti
 - Absorption and acceptance
 - Candle behavior around prior highs and lows
 
-The site lives in `public/` and is deployed as a static Netlify site.
+The GitHub Pages site is served directly from the repository root (`index.html` + `styles.css`). No Netlify backend or deployment is used.
 
 > Educational only. Order-flow tools are context, not guaranteed signals.
