@@ -164,7 +164,7 @@ const SceneWrite:React.FC=()=>{
 const SceneSpread:React.FC=()=>{
   const f=useCurrentFrame();
   const clickBeat=4;
-  const press=interpolate(f,[lb(3.6),lb(4),lb(4),lb(4.5)],[0,1,1,0],V3_CLAMP);
+  const press=f<=lb(4) ? interpolate(f,[lb(3.6),lb(4)],[0,1],V3_CLAMP) : interpolate(f,[lb(4),lb(4.5)],[1,0],V3_CLAMP);
   const sending=f>=lb(clickBeat)&&f<lb(14);
   const success=f>=lb(14);
   const appScale=interpolate(f,[lb(4),lb(5),lb(13),lb(14.5)],[1,.94,.94,.84],{...V3_CLAMP,easing:[V3_IOS,V3_IOS,V3_EASE],output:'perceptual-scale'});
