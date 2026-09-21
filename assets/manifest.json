@@ -1,0 +1,28 @@
+{
+  "groups": [
+    {
+      "label": "Screenshots",
+      "path": "assets/screenshots/",
+      "description": "Still images of apps, websites, dashboards and exact UI states.",
+      "items": []
+    },
+    {
+      "label": "Video",
+      "path": "assets/video/",
+      "description": "Screen recordings, product demos and clips used inside the animation.",
+      "items": []
+    },
+    {
+      "label": "Logos & icons",
+      "path": "assets/logos/",
+      "description": "SVG or high-resolution branding, product marks and icons.",
+      "items": []
+    },
+    {
+      "label": "Audio",
+      "path": "assets/audio/",
+      "description": "Voiceover, music and sound effects for the final edit.",
+      "items": []
+    }
+  ]
+}
