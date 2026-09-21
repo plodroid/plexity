@@ -1,6 +1,7 @@
 import React from 'react';
 import {Composition, Folder} from 'remotion';
 import {ArgonVideo} from './ArgonVideo';
+import {ArgonVideoV2} from './v2/ArgonVideoV2';
 import {FPS, HEIGHT, TOTAL_FRAMES, WIDTH, sceneDurationFrames} from './constants';
 import {Scene1Hook} from './scenes/Scene1Hook';
 import {Scene2Problem} from './scenes/Scene2Problem';
@@ -23,6 +24,8 @@ export const RemotionRoot: React.FC = () => (
       <Composition id="Argon-07-Compare" component={Scene7Compare} durationInFrames={sceneDurationFrames('compare')} fps={FPS} width={WIDTH} height={HEIGHT}/>
       <Composition id="Argon-08-Close" component={Scene8Close} durationInFrames={sceneDurationFrames('close')} fps={FPS} width={WIDTH} height={HEIGHT}/>
     </Folder>
+
     <Composition id="ArgonPromo" component={ArgonVideo} durationInFrames={TOTAL_FRAMES} fps={FPS} width={WIDTH} height={HEIGHT}/>
+    <Composition id="ArgonPromoV2" component={ArgonVideoV2} durationInFrames={TOTAL_FRAMES} fps={FPS} width={WIDTH} height={HEIGHT}/>
   </>
 );
