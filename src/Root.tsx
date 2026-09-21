@@ -2,7 +2,9 @@ import React from 'react';
 import {Composition, Folder} from 'remotion';
 import {ArgonVideo} from './ArgonVideo';
 import {ArgonVideoV2} from './v2/ArgonVideoV2';
+import {ArgonVideoV3} from './v3/ArgonVideoV3';
 import {FPS, HEIGHT, TOTAL_FRAMES, WIDTH, sceneDurationFrames} from './constants';
+import {V3_FPS,V3_HEIGHT,V3_TOTAL_FRAMES,V3_WIDTH} from './v3/constantsV3';
 import {Scene1Hook} from './scenes/Scene1Hook';
 import {Scene2Problem} from './scenes/Scene2Problem';
 import {Scene3Reveal} from './scenes/Scene3Reveal';
@@ -27,5 +29,6 @@ export const RemotionRoot: React.FC = () => (
 
     <Composition id="ArgonPromo" component={ArgonVideo} durationInFrames={TOTAL_FRAMES} fps={FPS} width={WIDTH} height={HEIGHT}/>
     <Composition id="ArgonPromoV2" component={ArgonVideoV2} durationInFrames={TOTAL_FRAMES} fps={FPS} width={WIDTH} height={HEIGHT}/>
+    <Composition id="ArgonPromoV3" component={ArgonVideoV3} durationInFrames={V3_TOTAL_FRAMES} fps={V3_FPS} width={V3_WIDTH} height={V3_HEIGHT}/>
   </>
 );
