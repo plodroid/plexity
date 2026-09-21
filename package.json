@@ -1,0 +1,24 @@
+{
+  "name": "plexity-argon-remotion",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts ArgonPromo out/argon-promo-1x1.mp4 --codec=h264 --crf=16 --audio-bitrate=320k",
+    "still": "remotion still src/index.ts ArgonPromo out/argon-cover.png --frame=5460",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.506",
+    "@remotion/media": "4.0.506",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "remotion": "4.0.506"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.30",
+    "@types/react": "19.1.8",
+    "@types/react-dom": "19.1.6",
+    "typescript": "5.8.3"
+  }
+}
