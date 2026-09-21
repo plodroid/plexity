@@ -3,346 +3,90 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#090b10">
-  <meta name="description" content="Plexity Order Flow — visual guide to sweeps, continuation, CVD and footprint confirmation.">
-  <title>Plexity Order Flow — Sweep vs Continuation</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta name="theme-color" content="#0b0b0c">
+  <meta name="description" content="Plexity video brief for Remotion production.">
+  <title>Plexity — Video Brief</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="#top" aria-label="Plexity Order Flow home">
-      <span class="logo">P</span><span>Plexity Order Flow</span>
-    </a>
+<header class="topbar">
+  <a class="brand" href="#script" aria-label="Plexity video brief">
+    <span class="brand-mark">P</span>
+    <span class="brand-copy"><strong>Plexity</strong><small>Video Brief</small></span>
+  </a>
+  <div class="status"><span class="status-dot"></span>Draft</div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <p class="sidebar-label">Project</p>
     <nav>
-      <a href="#framework">Framework</a>
-      <a href="#examples">Examples</a>\n      <a href="#real-aapl">Real AAPL</a>
-      <a href="#cheatsheet">Cheat sheet</a>
+      <a href="#script" class="nav-item active" data-section-link="script"><span>01</span>Script</a>
+      <a href="#assets" class="nav-item" data-section-link="assets"><span>02</span>Assets</a>
+      <a href="#idea" class="nav-item" data-section-link="idea"><span>03</span>Idea</a>
     </nav>
-  </header>
+    <div class="sidebar-note">
+      <strong>Remotion-ready</strong>
+      <p>Everything here is organised so the final animation can be built directly from this repo.</p>
+    </div>
+  </aside>
 
-  <main id="top">
-    <section class="hero">
-      <div class="hero-copy">
-        <span class="kicker">ORDER FLOW · SIMPLE MODE</span>
-        <h1>Sweep or continuation?</h1>
-        <p>Use <strong>SVP</strong> for location, <strong>CVD</strong> for aggression, and the <strong>footprint</strong> for execution detail. The key question is simple: after price takes liquidity, does the market <em>reject</em> the new area or <em>accept</em> it?</p>
-        <div class="legend">
-          <span><i class="dot green"></i> continuation evidence</span>
-          <span><i class="dot red"></i> sweep / reversal evidence</span>
-          <span><i class="dot blue"></i> context</span>
+  <main>
+    <section id="script" class="panel section-target">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">01 · Narrative</p>
+          <h1>Script</h1>
+          <p class="lede">Exact sequence, copy and timing for the final product video.</p>
         </div>
+        <span class="file-path">script.md</span>
       </div>
-      <div class="hero-card">
-        <div class="metric"><small>SVP</small><strong>Where?</strong><span>Location / value</span></div>
-        <div class="metric"><small>CVD</small><strong>Who?</strong><span>Aggressive side</span></div>
-        <div class="metric"><small>Footprint</small><strong>How?</strong><span>Execution detail</span></div>
+      <article id="script-content" class="document"><p class="loading">Loading script…</p></article>
+    </section>
+
+    <section id="assets" class="panel section-target">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">02 · Source material</p>
+          <h2>Assets</h2>
+          <p class="lede">Real product visuals used in the animation — no guessing and no fake UI.</p>
+        </div>
+        <span class="file-path">assets/</span>
+      </div>
+
+      <div class="asset-callout">
+        <div>
+          <strong>Put every visual/audio file inside <code>assets/</code></strong>
+          <p>Use the folders below so each asset has an obvious purpose when the Remotion project is generated.</p>
+        </div>
+        <button class="copy-button" type="button" data-copy="assets/">Copy path</button>
+      </div>
+
+      <div id="asset-grid" class="asset-grid"><p class="loading">Loading assets…</p></div>
+
+      <div class="naming-rule">
+        <span>Recommended naming</span>
+        <code>scene-01-dashboard.png</code>
+        <code>scene-02-browser-demo.mp4</code>
+        <code>logo-plexium.svg</code>
       </div>
     </section>
 
-    <section class="section" id="framework">
-      <div class="section-head">
-        <span class="eyebrow">THE CORE IDEA</span>
-        <h2>Effort vs result</h2>
-        <p>If aggressive buyers or sellers put in huge effort but price barely moves, someone may be absorbing them. If aggression and price move together, continuation is healthier.</p>
+    <section id="idea" class="panel section-target">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">03 · Direction</p>
+          <h2>Idea</h2>
+          <p class="lede">Creative intent, visual language and rules that guide the motion design.</p>
+        </div>
+        <span class="file-path">idea.md</span>
       </div>
-      <div class="concept-grid">
-        <article class="concept danger">
-          <span class="tag">ABSORPTION</span>
-          <h3>Big effort, little progress</h3>
-          <div class="equation"><b>Strong delta</b><span>+</span><b>Price stalls</b><span>=</span><b>Possible trap</b></div>
-          <p>Example: CVD rips higher at the prior high, but the candle rejects and closes back below it. Buyers were aggressive, yet price could not hold higher.</p>
-        </article>
-        <article class="concept success">
-          <span class="tag">ACCEPTANCE</span>
-          <h3>Big effort, real progress</h3>
-          <div class="equation"><b>Strong delta</b><span>+</span><b>Price expands</b><span>=</span><b>Continuation</b></div>
-          <p>Example: price breaks the prior high, CVD rises with it, footprints show buy imbalances, and pullbacks hold above the breakout.</p>
-        </article>
-      </div>
-    </section>
-
-    <section class="section" id="examples">
-      <div class="section-head">
-        <span class="eyebrow">4 VISUAL EXAMPLES</span>
-        <h2>What it looks like on the chart</h2>
-      </div>
-
-      <div class="examples">
-        <article class="example danger">
-          <div class="example-title">
-            <div><span class="number">01</span><h3>High sweep + absorption</h3></div>
-            <span class="verdict">Likely sweep</span>
-          </div>
-          <div class="visual-grid">
-            <div class="chart-card">
-              <div class="chart-label">PRICE</div>
-              <div class="chart">
-                <div class="level high"><span>Previous high</span></div>
-                <div class="candles sweep-high">
-                  <i style="--x:4%;--h:38px;--b:18px" class="up"></i><i style="--x:11%;--h:48px;--b:24px" class="up"></i><i style="--x:18%;--h:42px;--b:22px" class="down"></i><i style="--x:25%;--h:55px;--b:30px" class="up"></i><i style="--x:32%;--h:64px;--b:34px" class="up"></i><i style="--x:39%;--h:88px;--b:42px" class="up spike"></i><i style="--x:46%;--h:72px;--b:32px" class="down"></i><i style="--x:53%;--h:58px;--b:30px" class="down"></i><i style="--x:60%;--h:61px;--b:31px" class="down"></i><i style="--x:67%;--h:70px;--b:34px" class="down"></i><i style="--x:74%;--h:78px;--b:38px" class="down"></i><i style="--x:81%;--h:64px;--b:30px" class="up"></i>
-                </div>
-                <span class="callout high-call">sweep ↑</span>
-              </div>
-            </div>
-            <div class="footprint">
-              <div class="chart-label">FOOTPRINT AT THE HIGH</div>
-              <div class="fp-row"><span>50</span><b>180</b></div>
-              <div class="fp-row"><span>80</span><b>260</b></div>
-              <div class="fp-row hot"><span>90</span><b>320</b></div>
-              <div class="fp-row hot"><span>100</span><b>380</b></div>
-              <div class="fp-row hot"><span>120</span><b>450</b></div>
-              <p>Heavy market buying, but price cannot stay above the level.</p>
-            </div>
-          </div>
-          <div class="cvd-card">
-            <div class="chart-label">CVD</div>
-            <svg viewBox="0 0 420 92" preserveAspectRatio="none" aria-label="CVD rises then stalls">
-              <polyline points="0,80 35,72 75,62 110,55 145,44 180,31 215,18 250,12 285,15 320,13 355,17 420,18"/>
-            </svg>
-            <span>CVD ↑ while price rejects = buyers may be trapped / absorbed.</span>
-          </div>
-          <ul class="checks"><li>High is swept</li><li>CVD is strongly positive</li><li>Footprint shows aggressive buying</li><li>Price closes back below the level</li></ul>
-        </article>
-
-        <article class="example success">
-          <div class="example-title">
-            <div><span class="number">02</span><h3>High break + acceptance</h3></div>
-            <span class="verdict">Likely continuation</span>
-          </div>
-          <div class="visual-grid">
-            <div class="chart-card">
-              <div class="chart-label">PRICE</div>
-              <div class="chart">
-                <div class="level high"><span>Previous high</span></div>
-                <div class="candles trend-up">
-                  <i style="--x:4%;--h:34px;--b:18px" class="up"></i><i style="--x:11%;--h:42px;--b:22px" class="up"></i><i style="--x:18%;--h:48px;--b:24px" class="up"></i><i style="--x:25%;--h:52px;--b:28px" class="up"></i><i style="--x:32%;--h:62px;--b:30px" class="up"></i><i style="--x:39%;--h:69px;--b:34px" class="up"></i><i style="--x:46%;--h:72px;--b:30px" class="up"></i><i style="--x:53%;--h:63px;--b:27px" class="down"></i><i style="--x:60%;--h:68px;--b:29px" class="up"></i><i style="--x:67%;--h:75px;--b:35px" class="up"></i><i style="--x:74%;--h:82px;--b:37px" class="up"></i><i style="--x:81%;--h:88px;--b:40px" class="up"></i>
-                </div>
-                <span class="callout high-call">break + hold ↑</span>
-              </div>
-            </div>
-            <div class="footprint">
-              <div class="chart-label">FOOTPRINT AT BREAKOUT</div>
-              <div class="fp-row"><span>80</span><b>200</b></div>
-              <div class="fp-row hot buy"><span>150</span><b>500</b></div>
-              <div class="fp-row hot buy"><span>180</span><b>620</b></div>
-              <div class="fp-row hot buy"><span>200</span><b>700</b></div>
-              <p>Buy imbalances appear and price actually moves higher.</p>
-            </div>
-          </div>
-          <div class="cvd-card">
-            <div class="chart-label">CVD</div>
-            <svg viewBox="0 0 420 92" preserveAspectRatio="none" aria-label="CVD rises with price">
-              <polyline points="0,82 35,76 70,68 105,60 140,54 175,44 210,36 245,28 280,20 315,16 350,9 420,4"/>
-            </svg>
-            <span>CVD ↑ + price ↑ = aggression is producing real progress.</span>
-          </div>
-          <ul class="checks"><li>Break holds above the high</li><li>CVD confirms upward</li><li>Footprint has buy imbalances</li><li>Pullback stays above breakout</li></ul>
-        </article>
-
-        <article class="example danger">
-          <div class="example-title">
-            <div><span class="number">03</span><h3>Low sweep + absorption</h3></div>
-            <span class="verdict">Likely sweep</span>
-          </div>
-          <div class="visual-grid">
-            <div class="chart-card">
-              <div class="chart-label">PRICE</div>
-              <div class="chart">
-                <div class="level low"><span>Previous low</span></div>
-                <div class="candles sweep-low">
-                  <i style="--x:4%;--h:78px;--b:36px" class="down"></i><i style="--x:11%;--h:72px;--b:33px" class="down"></i><i style="--x:18%;--h:65px;--b:30px" class="down"></i><i style="--x:25%;--h:58px;--b:28px" class="down"></i><i style="--x:32%;--h:52px;--b:26px" class="down"></i><i style="--x:39%;--h:88px;--b:39px" class="down spike"></i><i style="--x:46%;--h:63px;--b:29px" class="up"></i><i style="--x:53%;--h:69px;--b:31px" class="up"></i><i style="--x:60%;--h:75px;--b:35px" class="up"></i><i style="--x:67%;--h:80px;--b:38px" class="up"></i><i style="--x:74%;--h:86px;--b:41px" class="up"></i>
-                </div>
-                <span class="callout low-call">sweep ↓</span>
-              </div>
-            </div>
-            <div class="footprint">
-              <div class="chart-label">FOOTPRINT AT THE LOW</div>
-              <div class="fp-row hot sell"><b>460</b><span>130</span></div>
-              <div class="fp-row hot sell"><b>390</b><span>110</span></div>
-              <div class="fp-row hot sell"><b>340</b><span>90</span></div>
-              <div class="fp-row"><b>200</b><span>80</span></div>
-              <p>Heavy market selling, but price cannot stay below the level.</p>
-            </div>
-          </div>
-          <div class="cvd-card">
-            <div class="chart-label">CVD</div>
-            <svg viewBox="0 0 420 92" preserveAspectRatio="none" aria-label="CVD falls while price reclaims">
-              <polyline points="0,12 35,18 70,26 105,34 140,44 175,55 210,64 245,69 280,72 315,78 350,80 420,86"/>
-            </svg>
-            <span>CVD ↓ while price reclaims = sellers may be trapped / absorbed.</span>
-          </div>
-          <ul class="checks"><li>Low is swept</li><li>CVD is strongly negative</li><li>Footprint shows aggressive selling</li><li>Price reclaims the level</li></ul>
-        </article>
-
-        <article class="example success">
-          <div class="example-title">
-            <div><span class="number">04</span><h3>Low break + acceptance</h3></div>
-            <span class="verdict">Likely continuation</span>
-          </div>
-          <div class="visual-grid">
-            <div class="chart-card">
-              <div class="chart-label">PRICE</div>
-              <div class="chart">
-                <div class="level low"><span>Previous low</span></div>
-                <div class="candles trend-down">
-                  <i style="--x:4%;--h:86px;--b:40px" class="down"></i><i style="--x:11%;--h:80px;--b:37px" class="down"></i><i style="--x:18%;--h:74px;--b:35px" class="down"></i><i style="--x:25%;--h:69px;--b:31px" class="down"></i><i style="--x:32%;--h:63px;--b:29px" class="down"></i><i style="--x:39%;--h:57px;--b:27px" class="down"></i><i style="--x:46%;--h:54px;--b:25px" class="down"></i><i style="--x:53%;--h:59px;--b:26px" class="up"></i><i style="--x:60%;--h:51px;--b:24px" class="down"></i><i style="--x:67%;--h:45px;--b:22px" class="down"></i><i style="--x:74%;--h:39px;--b:20px" class="down"></i><i style="--x:81%;--h:34px;--b:18px" class="down"></i>
-                </div>
-                <span class="callout low-call">break + hold ↓</span>
-              </div>
-            </div>
-            <div class="footprint">
-              <div class="chart-label">FOOTPRINT AT BREAKDOWN</div>
-              <div class="fp-row hot sell"><b>520</b><span>140</span></div>
-              <div class="fp-row hot sell"><b>610</b><span>160</span></div>
-              <div class="fp-row hot sell"><b>700</b><span>180</span></div>
-              <div class="fp-row"><b>420</b><span>120</span></div>
-              <p>Sell imbalances appear and price keeps moving lower.</p>
-            </div>
-          </div>
-          <div class="cvd-card">
-            <div class="chart-label">CVD</div>
-            <svg viewBox="0 0 420 92" preserveAspectRatio="none" aria-label="CVD falls with price">
-              <polyline points="0,8 35,14 70,20 105,28 140,34 175,42 210,50 245,58 280,65 315,73 350,80 420,88"/>
-            </svg>
-            <span>CVD ↓ + price ↓ = aggressive sellers are moving price.</span>
-          </div>
-          <ul class="checks"><li>Break holds below the low</li><li>CVD confirms downward</li><li>Footprint has sell imbalances</li><li>Retest fails below breakout</li></ul>
-        </article>
-      </div>
-    </section>
-
-    <section class="section" id="real-aapl">
-      <div class="section-head">
-        <span class="eyebrow">REAL AAPL NY SESSIONS</span>
-        <h2>Four real Apple examples</h2>
-        <p>These are reconstructed from real NASDAQ:AAPL regular-session OHLC and volume. The right-side SVP shapes are teaching reconstructions of how acceptance/rejection would appear; exact price-bin SVP can vary by data feed and requires intraday/tick volume-at-price data.</p>
-      </div>
-
-      <div class="real-grid">
-        <article class="real-example danger">
-          <div class="real-top"><div><span class="case-type">SHORT REVERSAL · AUG 20, 2026</span><h3>Previous high swept, then violently rejected</h3></div><span class="real-badge">High sweep</span></div>
-          <div class="real-chart">
-            <div class="real-price-area">
-              <div class="prior-line prior-high" style="--level:25%"><span>Aug 19 high · $319.28</span></div>
-              <div class="ohlc-path bearish">
-                <span class="wick" style="--top:12%;--bottom:80%"></span>
-                <span class="body" style="--top:28%;--bottom:75%"></span>
-              </div>
-              <span class="sweep-note top">high $320.28 → rejection</span>
-            </div>
-            <div class="svp-proxy down-profile">
-              <span class="svp-title">SVP</span>
-              <i style="--w:38%"></i><i style="--w:52%"></i><i style="--w:72%"></i><i class="poc" style="--w:94%"></i><i style="--w:82%"></i><i style="--w:58%"></i><i style="--w:34%"></i>
-              <b class="vp-label vah">VAH</b><b class="vp-label pocl">POC area</b><b class="vp-label val">VAL</b>
-            </div>
-          </div>
-          <div class="session-stats"><span>O <b>$317.45</b></span><span>H <b>$320.28</b></span><span>L <b>$310.65</b></span><span>C <b>$311.30</b></span><span>Vol <b>40.96M</b></span></div>
-          <p class="real-read"><strong>Why it fits:</strong> Aug 20 traded $1.00 above Aug 19's high, but finished $7.98 below that prior high. That is the exact behavior we mean by <em>take buy-side liquidity → fail to accept → rotate lower</em>. On an SVP, you would watch for poor volume acceptance at the extreme and value building back lower.</p>
-        </article>
-
-        <article class="real-example success">
-          <div class="real-top"><div><span class="case-type">LONG REVERSAL · SEP 9, 2026</span><h3>Previous low swept, then reclaimed</h3></div><span class="real-badge">Low sweep</span></div>
-          <div class="real-chart">
-            <div class="real-price-area">
-              <div class="prior-line prior-low" style="--level:45%"><span>Sep 8 low · $314.90</span></div>
-              <div class="ohlc-path reclaim">
-                <span class="wick" style="--top:20%;--bottom:92%"></span>
-                <span class="body" style="--top:43%;--bottom:46%"></span>
-              </div>
-              <span class="sweep-note bottom">low $309.90 → reclaim</span>
-            </div>
-            <div class="svp-proxy reclaim-profile">
-              <span class="svp-title">SVP</span>
-              <i style="--w:30%"></i><i style="--w:45%"></i><i style="--w:70%"></i><i class="poc" style="--w:100%"></i><i style="--w:83%"></i><i style="--w:52%"></i><i style="--w:26%"></i>
-              <b class="vp-label vah">VAH</b><b class="vp-label pocl">RTH VWAP $314.24</b><b class="vp-label val">VAL</b>
-            </div>
-          </div>
-          <div class="session-stats"><span>O <b>$315.49</b></span><span>H <b>$319.15</b></span><span>L <b>$309.90</b></span><span>C <b>$315.34</b></span><span>Vol <b>64.68M</b></span></div>
-          <p class="real-read"><strong>Why it fits:</strong> AAPL ran $5.00 below Sep 8's low, yet closed back above it. MarketChameleon reports regular-hours VWAP near $314.24 and exceptionally heavy midday notional volume, so the market did meaningful business back inside the reclaimed area. That is the kind of acceptance you want after a sell-side sweep.</p>
-        </article>
-
-        <article class="real-example success">
-          <div class="real-top"><div><span class="case-type">LONG CONTINUATION · SEP 10, 2026</span><h3>Previous high broke and value expanded upward</h3></div><span class="real-badge">Upside acceptance</span></div>
-          <div class="real-chart">
-            <div class="real-price-area">
-              <div class="prior-line prior-high" style="--level:68%"><span>Sep 9 high · $319.15</span></div>
-              <div class="ohlc-path bullish">
-                <span class="wick" style="--top:8%;--bottom:83%"></span>
-                <span class="body" style="--top:10%;--bottom:81%"></span>
-              </div>
-              <span class="sweep-note top">close $326.57 near session high</span>
-            </div>
-            <div class="svp-proxy up-profile">
-              <span class="svp-title">SVP</span>
-              <i style="--w:35%"></i><i style="--w:64%"></i><i class="poc" style="--w:100%"></i><i style="--w:91%"></i><i style="--w:74%"></i><i style="--w:43%"></i><i style="--w:24%"></i>
-              <b class="vp-label vah">VAH ↑</b><b class="vp-label pocl">value migrates ↑</b><b class="vp-label val">VAL ↑</b>
-            </div>
-          </div>
-          <div class="session-stats"><span>O <b>$316.67</b></span><span>H <b>$326.74</b></span><span>L <b>$316.51</b></span><span>C <b>$326.57</b></span><span>Vol <b>69.37M</b></span></div>
-          <p class="real-read"><strong>Why it fits:</strong> Sep 10 broke Sep 9's $319.15 high and closed $7.42 above it—just $0.17 under the day's high—with about 69.4M shares traded. Instead of poking the level and falling back, price stayed above it. That is <em>break → acceptance → continuation</em>.</p>
-        </article>
-
-        <article class="real-example danger">
-          <div class="real-top"><div><span class="case-type">SHORT CONTINUATION · SEP 4, 2026</span><h3>Previous low broke and price accepted below</h3></div><span class="real-badge">Downside acceptance</span></div>
-          <div class="real-chart">
-            <div class="real-price-area">
-              <div class="prior-line prior-low" style="--level:42%"><span>Sep 3 low · $324.11</span></div>
-              <div class="ohlc-path bearish">
-                <span class="wick" style="--top:9%;--bottom:91%"></span>
-                <span class="body" style="--top:14%;--bottom:75%"></span>
-              </div>
-              <span class="sweep-note bottom">close $319.97 below prior low</span>
-            </div>
-            <div class="svp-proxy down-profile">
-              <span class="svp-title">SVP</span>
-              <i style="--w:28%"></i><i style="--w:45%"></i><i style="--w:69%"></i><i style="--w:88%"></i><i class="poc" style="--w:100%"></i><i style="--w:77%"></i><i style="--w:46%"></i>
-              <b class="vp-label vah">VAH ↓</b><b class="vp-label pocl">value migrates ↓</b><b class="vp-label val">VAL ↓</b>
-            </div>
-          </div>
-          <div class="session-stats"><span>O <b>$328.31</b></span><span>H <b>$328.93</b></span><span>L <b>$317.86</b></span><span>C <b>$319.97</b></span><span>Vol <b>39.61M</b></span></div>
-          <p class="real-read"><strong>Why it fits:</strong> Sep 4 broke Sep 3's $324.11 low by $6.25 and still closed $4.14 below that prior low. The market did not reclaim the broken level. That is the continuation version: lower prices were accepted rather than rejected.</p>
-        </article>
-      </div>
-
-      <div class="source-note">
-        <strong>Real-data sources:</strong> NASDAQ:AAPL regular-session OHLC/volume from StockAnalysis / FinanceCharts. Sep 9 intraday session VWAP/notional breakdown from MarketChameleon. SVP shapes above are explanatory reconstructions, not copied tick profiles; exact POC/VAH/VAL depends on the volume-at-price feed and profile settings.
-        <a href="https://stockanalysis.com/stocks/aapl/history/" target="_blank" rel="noopener">AAPL history ↗</a>
-        <a href="https://marketchameleon.com/Overview/AAPL/Stock-Price-Action/" target="_blank" rel="noopener">Session volume/VWAP ↗</a>
-      </div>
-    </section>
-
-    <section class="section" id="cheatsheet">
-      <div class="section-head">
-        <span class="eyebrow">DECISION FLOW</span>
-        <h2>5 questions after the sweep</h2>
-      </div>
-      <div class="questions">
-        <div><b>1</b><span>Did price <strong>accept outside</strong> the level or immediately come back inside?</span></div>
-        <div><b>2</b><span>Did <strong>CVD confirm</strong> the move, or diverge from price?</span></div>
-        <div><b>3</b><span>Does the footprint show <strong>real buy/sell imbalances</strong>?</span></div>
-        <div><b>4</b><span>Is there <strong>absorption</strong> at the extreme: huge aggression with little price progress?</span></div>
-        <div><b>5</b><span>Does the next pullback <strong>hold the breakout</strong> or reclaim the old range?</span></div>
-      </div>
-
-      <div class="summary-grid">
-        <article class="summary danger">
-          <span>Sweep / reversal evidence</span>
-          <strong>Level taken → aggression spikes → price fails → reclaim</strong>
-          <p>Think: “they hit hard, but got nowhere.”</p>
-        </article>
-        <article class="summary success">
-          <span>Continuation evidence</span>
-          <strong>Level breaks → aggression confirms → price expands → retest holds</strong>
-          <p>Think: “they hit hard, and price actually followed.”</p>
-        </article>
-      </div>
-
-      <aside class="note">
-        <strong>Important:</strong> this is confirmation, not certainty. CVD and footprints can differ by data feed and venue, especially outside centralized futures markets. Use them with the level, session context and risk management—not as a standalone signal.
-      </aside>
+      <article id="idea-content" class="document"><p class="loading">Loading idea…</p></article>
     </section>
   </main>
+</div>
 
-  <footer>Plexity Order Flow · Educational visual guide</footer>
+<footer><span>Plexity / Video Brief</span><span>Source of truth for Remotion.</span></footer>
 </body>
 </html>
