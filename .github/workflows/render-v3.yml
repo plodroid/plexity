@@ -1,0 +1,44 @@
+name: Render Argon Promo V3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/render-v3.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Validate TypeScript
+        run: npm run typecheck
+
+      - name: Verify V3 composition
+        run: npm run compositions
+
+      - name: Render ArgonPromoV3
+        run: npm run render:v3
+
+      - name: Upload rendered video
+        uses: actions/upload-artifact@v4
+        with:
+          name: argon-promo-v3-video
+          path: out/argon-promo-v3-1x1.mp4
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
