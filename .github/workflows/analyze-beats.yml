@@ -1,0 +1,45 @@
+name: Analyze Music Beat Phase
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/analyze-beats.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -q librosa soundfile
+      - name: Detect beat phase
+        run: |
+          python - <<'PY'
+          import librosa, numpy as np
+          path='assets/audio/Tame_Impala_-_Loser.mp3'
+          y,sr=librosa.load(path,sr=None,mono=True)
+          onset=librosa.onset.onset_strength(y=y,sr=sr,hop_length=512)
+          tempo, beats=librosa.beat.beat_track(onset_envelope=onset,sr=sr,hop_length=512,bpm=85.0,units='frames')
+          times=librosa.frames_to_time(beats,sr=sr,hop_length=512)
+          print('tempo_estimate', float(np.atleast_1d(tempo)[0]))
+          print('duration', len(y)/sr)
+          print('first_32_beats')
+          for i,t in enumerate(times[:32]):
+              print(i, f'{t:.6f}')
+          if len(times):
+              period=60/85
+              phases=np.mod(times,period)
+              # circular mean phase
+              angles=2*np.pi*phases/period
+              phase=np.angle(np.mean(np.exp(1j*angles)))
+              if phase<0: phase+=2*np.pi
+              phase=phase/(2*np.pi)*period
+              print('phase_85bpm', f'{phase:.6f}')
+          PY
