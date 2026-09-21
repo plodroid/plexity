@@ -1,0 +1,56 @@
+name: Package Remotion Project
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/package-remotion.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build clean project folder
+        shell: bash
+        run: |
+          set -e
+          mkdir -p dist/argon-remotion
+          cp package.json tsconfig.json remotion.config.ts REMOTION.md script.md idea.md dist/argon-remotion/
+          cp -R src dist/argon-remotion/src
+          cp -R assets dist/argon-remotion/assets
+          cat > dist/argon-remotion/START-HERE.txt <<'EOF'
+          ARGON REMOTION PROJECT
+
+          1. Extract this folder.
+          2. Open a terminal inside argon-remotion.
+          3. Run:
+             npm install
+             npm run studio
+
+          To render the finished square MP4:
+             npm run render
+
+          Main composition:
+             ArgonPromo
+
+          Resolution: 1080x1080
+          FPS: 60
+          Duration: ~91.765 seconds
+          BPM: 85
+          EOF
+
+      - name: Upload project ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: argon-remotion-project
+          path: dist/argon-remotion/
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 1
