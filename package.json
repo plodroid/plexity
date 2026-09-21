@@ -5,8 +5,10 @@
   "scripts": {
     "studio": "remotion studio src/index.ts",
     "render": "remotion render src/index.ts ArgonPromo out/argon-promo-1x1.mp4 --codec=h264 --crf=16 --audio-bitrate=320k",
-    "still": "remotion still src/index.ts ArgonPromo out/argon-cover.png --frame=5460",
-    "typecheck": "tsc --noEmit"
+    "render:v2": "remotion render src/index.ts ArgonPromoV2 out/argon-promo-v2-1x1.mp4 --codec=h264 --crf=16 --audio-bitrate=320k",
+    "still": "remotion still src/index.ts ArgonPromoV2 out/argon-cover.png --frame=5460",
+    "typecheck": "tsc --noEmit",
+    "compositions": "remotion compositions src/index.ts"
   },
   "dependencies": {
     "@remotion/cli": "4.0.506",
