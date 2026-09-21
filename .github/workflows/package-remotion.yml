@@ -5,6 +5,13 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/package-remotion.yml"
+      - "src/**"
+      - "assets/**"
+      - "package.json"
+      - "tsconfig.json"
+      - "remotion.config.ts"
+      - "script.md"
+      - "idea.md"
   workflow_dispatch:
 
 permissions:
@@ -16,6 +23,20 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Verify Remotion compositions
+        run: npm run compositions
 
       - name: Build clean project folder
         shell: bash
@@ -34,11 +55,15 @@ jobs:
              npm install
              npm run studio
 
-          To render the finished square MP4:
+          Studio compositions:
+             ArgonPromo    = original working cut
+             ArgonPromoV2  = improved alternate cut
+
+          Render original:
              npm run render
 
-          Main composition:
-             ArgonPromo
+          Render V2:
+             npm run render:v2
 
           Resolution: 1080x1080
           FPS: 60
