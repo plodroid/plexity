@@ -6,7 +6,8 @@
     "studio": "remotion studio src/index.ts",
     "render": "remotion render src/index.ts ArgonPromo out/argon-promo-1x1.mp4 --codec=h264 --crf=16 --audio-bitrate=320k",
     "render:v2": "remotion render src/index.ts ArgonPromoV2 out/argon-promo-v2-1x1.mp4 --codec=h264 --crf=16 --audio-bitrate=320k",
-    "still": "remotion still src/index.ts ArgonPromoV2 out/argon-cover.png --frame=5460",
+    "render:v3": "remotion render src/index.ts ArgonPromoV3 out/argon-promo-v3-1x1.mp4 --codec=h264 --crf=15 --audio-bitrate=320k",
+    "still": "remotion still src/index.ts ArgonPromoV3 out/argon-cover-v3.png --frame=4200",
     "typecheck": "tsc --noEmit",
     "compositions": "remotion compositions src/index.ts"
   },
