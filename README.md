@@ -1,13 +1,23 @@
-# Plexity Order Flow
+# Plexity Video Brief
 
-A static GitHub Pages visual guide explaining liquidity sweeps vs continuation with:
+This repository is the source-of-truth workspace for an AI-assisted Remotion product video.
 
-- Session Volume Profile (SVP)
-- Cumulative Volume Delta (CVD)
-- Footprint / bid-ask imbalance
-- Absorption and acceptance
-- Candle behavior around prior highs and lows
+## Structure
 
-The GitHub Pages site is served directly from the repository root (`index.html` + `styles.css`). No Netlify backend or deployment is used.
+- `script.md` — exact narrative, scenes, copy and timing.
+- `idea.md` — creative direction and motion rules.
+- `assets/manifest.json` — machine-readable asset index used by the website.
+- `assets/screenshots/` — app/site screenshots.
+- `assets/video/` — screen recordings and product clips.
+- `assets/audio/` — voiceover, music and sound effects.
+- `assets/logos/` — logos, icons and SVG brand assets.
 
-> Educational only. Order-flow tools are context, not guaranteed signals.
+The root website visualizes the brief on GitHub Pages.
+
+## Adding assets
+
+1. Put the real file in the matching `assets/` subfolder.
+2. Add it to `assets/manifest.json`.
+3. Reference that exact path from `script.md` when a scene needs it.
+
+This structure is intentionally simple so the final Remotion project can be generated without guessing asset names or scene intent.
